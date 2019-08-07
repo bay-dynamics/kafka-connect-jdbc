@@ -46,7 +46,7 @@ public class SinkRecordField {
     return schema.type();
   }
 
-  public boolean isCompositeType() { return schemaType().equals("STRUCT"); }
+  public boolean isCompositeType() { return schemaType().equals(Schema.Type.STRUCT); }
 
   public String name() {
     return name;

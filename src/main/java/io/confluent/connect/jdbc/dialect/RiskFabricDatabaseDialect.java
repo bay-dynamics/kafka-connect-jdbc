@@ -1,16 +1,16 @@
 package io.confluent.connect.jdbc.dialect;
 
+import com.baydynamics.riskfabric.connect.data.EpochMillisConverter;
+import com.baydynamics.riskfabric.connect.data.UIDConverter;
+import io.confluent.connect.jdbc.dialect.DatabaseDialect;
+import io.confluent.connect.jdbc.dialect.DatabaseDialectProvider;
+import io.confluent.connect.jdbc.dialect.PostgreSqlDatabaseDialect;
 import org.apache.kafka.common.config.AbstractConfig;
-import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-
-import com.baydynamics.riskfabric.connect.data.TimestampConverter;
-import com.baydynamics.riskfabric.connect.data.UIDConverter;
-import com.baydynamics.riskfabric.connect.data.TimestampRF;
-import org.apache.kafka.connect.data.Struct;
+import java.sql.Types;
 
 public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
     public RiskFabricDatabaseDialect(AbstractConfig config) {
@@ -95,6 +95,14 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
                         java.sql.Types.OTHER
                     );
                     return true;
+                case EpochMillisConverter.LOGICAL_NAME:
+                    statement.setObject(
+                            index,
+                            EpochMillisConverter.toLogical(schema, value),
+                            Types.TIMESTAMP
+                    );
+                    return true;
+
 //                case TimestampConverter.LOGICAL_NAME:
 //                    statement.setObject(
 //                        index,

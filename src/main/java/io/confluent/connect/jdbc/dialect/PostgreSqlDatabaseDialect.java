@@ -256,9 +256,11 @@ public class PostgreSqlDatabaseDialect extends GenericDatabaseDialect {
 
       SinkRecordField sinkField = fieldsMetadata.allFields.get(nonKeyColumn.name());
       if (sinkField.isCompositeType()) {
+        builder.append(",ROW(");
         builder.appendMultiple(",", "?", sinkField.fieldNamesForCompositeType().size());
+        builder.append(")");
       } else {
-        builder.append(", ?");
+        builder.append(",?");
       }
     }
 

@@ -115,10 +115,15 @@ public class FieldsMetadata {
           continue;
         }
 
-        nonKeyFieldNames.add(field.name());
+        if (field.schema().type().equals(Schema.Type.STRUCT)) {
 
-        final Schema fieldSchema = field.schema();
-        allFields.put(field.name(), new SinkRecordField(fieldSchema, field.name(), false));
+        }
+        else {
+            nonKeyFieldNames.add(field.name());
+
+            final Schema fieldSchema = field.schema();
+            allFields.put(field.name(), new SinkRecordField(fieldSchema, field.name(), false));
+        }
       }
     }
 

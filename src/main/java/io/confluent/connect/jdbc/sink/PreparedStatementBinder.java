@@ -141,7 +141,7 @@ public class PreparedStatementBinder implements StatementBinder {
     for (final String fieldName : fieldsMetadata.nonKeyFieldNames) {
       final Field field = record.valueSchema().field(fieldName);
 
-      if (field.schema().type().name().equals("STRUCT")) {
+      if (field.schema().type().equals(Schema.Type.STRUCT)) {
         Struct nestedValueStruct = (Struct) valueStruct.get(field);
         index = bindCompositeField(index++, field.schema(), nestedValueStruct);
       }

@@ -5,7 +5,7 @@ import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.errors.DataException;
 
 public class UIDConverter {
-    public static final String LOGICAL_NAME = "com.baydynamics.riskfabric.connect.data.UID";
+    public static final String LOGICAL_NAME = "riskfabric.UID";
 
     public static SchemaBuilder builder() {
         return SchemaBuilder.string()
