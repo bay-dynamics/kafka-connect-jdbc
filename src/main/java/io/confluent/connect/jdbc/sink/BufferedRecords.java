@@ -259,8 +259,7 @@ public class BufferedRecords {
       case INSERT:
         return dbDialect.buildInsertStatement(
             tableId,
-            asColumns(fieldsMetadata.keyFieldNames),
-            asColumns(fieldsMetadata.nonKeyFieldNames)
+            fieldsMetadata
         );
       case UPSERT:
         if (fieldsMetadata.keyFieldNames.isEmpty()) {
@@ -273,8 +272,7 @@ public class BufferedRecords {
         try {
           return dbDialect.buildUpsertQueryStatement(
               tableId,
-              asColumns(fieldsMetadata.keyFieldNames),
-              asColumns(fieldsMetadata.nonKeyFieldNames)
+              fieldsMetadata
           );
         } catch (UnsupportedOperationException e) {
           throw new ConnectException(String.format(
@@ -286,8 +284,7 @@ public class BufferedRecords {
       case UPDATE:
         return dbDialect.buildUpdateStatement(
             tableId,
-            asColumns(fieldsMetadata.keyFieldNames),
-            asColumns(fieldsMetadata.nonKeyFieldNames)
+            fieldsMetadata
         );
       default:
         throw new ConnectException("Invalid insert mode");

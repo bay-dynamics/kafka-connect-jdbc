@@ -15,10 +15,13 @@
 
 package io.confluent.connect.jdbc.dialect;
 
+import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.connect.data.Date;
 import org.apache.kafka.connect.data.Decimal;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Time;
 import org.apache.kafka.connect.data.Timestamp;
@@ -217,6 +220,53 @@ public class PostgreSqlDatabaseDialect extends GenericDatabaseDialect {
   }
 
   @Override
+  public int bindCompositeField(
+          PreparedStatement statement,
+          int startIndex,
+          Schema schema,
+          Struct value
+  ) throws SQLException {
+    int lastIndex = startIndex;
+    // not recursive!
+    for (final Field nestedField : schema.fields()) {
+      bindField(statement, lastIndex++, nestedField.schema(), value.get(nestedField));
+    }
+    return lastIndex;
+  }
+
+  public String buildInsertStatement(
+    TableId table,
+    FieldsMetadata fieldsMetadata
+  ) {
+    Collection<ColumnId> keyColumns = asColumns(table, fieldsMetadata.keyFieldNames);
+    Collection<ColumnId> nonKeyColumns = asColumns(table, fieldsMetadata.nonKeyFieldNames);
+
+    ExpressionBuilder builder = expressionBuilder();
+    builder.append("INSERT INTO ");
+    builder.append(table);
+    builder.append("(");
+    builder.appendList()
+          .delimitedBy(",")
+          .transformedBy(ExpressionBuilder.columnNames())
+          .of(keyColumns, nonKeyColumns);
+    builder.append(") VALUES(");
+
+    builder.appendMultiple(",", "?", keyColumns.size());
+    for (ColumnId nonKeyColumn : nonKeyColumns) {
+
+      SinkRecordField sinkField = fieldsMetadata.allFields.get(nonKeyColumn.name());
+      if (sinkField.isCompositeType()) {
+        builder.appendMultiple(",", "?", sinkField.fieldNamesForCompositeType().size());
+      } else {
+        builder.append(", ?");
+      }
+    }
+
+    builder.append(")");
+    return builder.toString();
+  }
+
+  @Override
   public String buildUpsertQueryStatement(
       TableId table,
       Collection<ColumnId> keyColumns,
@@ -254,5 +304,4 @@ public class PostgreSqlDatabaseDialect extends GenericDatabaseDialect {
     }
     return builder.toString();
   }
-
 }
