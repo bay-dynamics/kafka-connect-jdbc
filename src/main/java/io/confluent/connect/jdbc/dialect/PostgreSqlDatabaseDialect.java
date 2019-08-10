@@ -234,40 +234,6 @@ public class PostgreSqlDatabaseDialect extends GenericDatabaseDialect {
     return lastIndex;
   }
 
-  public String buildInsertStatement(
-    TableId table,
-    FieldsMetadata fieldsMetadata
-  ) {
-    Collection<ColumnId> keyColumns = asColumns(table, fieldsMetadata.keyFieldNames);
-    Collection<ColumnId> nonKeyColumns = asColumns(table, fieldsMetadata.nonKeyFieldNames);
-
-    ExpressionBuilder builder = expressionBuilder();
-    builder.append("INSERT INTO ");
-    builder.append(table);
-    builder.append("(");
-    builder.appendList()
-          .delimitedBy(",")
-          .transformedBy(ExpressionBuilder.columnNames())
-          .of(keyColumns, nonKeyColumns);
-    builder.append(") VALUES(");
-
-    builder.appendMultiple(",", "?", keyColumns.size());
-    for (ColumnId nonKeyColumn : nonKeyColumns) {
-
-      SinkRecordField sinkField = fieldsMetadata.allFields.get(nonKeyColumn.name());
-      if (sinkField.isCompositeType()) {
-        builder.append(",ROW(");
-        builder.appendMultiple(",", "?", sinkField.fieldNamesForCompositeType().size());
-        builder.append(")");
-      } else {
-        builder.append(",?");
-      }
-    }
-
-    builder.append(")");
-    return builder.toString();
-  }
-
   @Override
   public String buildUpsertQueryStatement(
       TableId table,

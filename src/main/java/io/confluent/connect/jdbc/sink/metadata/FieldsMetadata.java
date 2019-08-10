@@ -32,24 +32,27 @@ public class FieldsMetadata {
 
   public final Set<String> keyFieldNames;
   public final Set<String> nonKeyFieldNames;
+  public final Set<String> nonKeyFieldNamesExpandedForCompositeTypes;
   public final Map<String, SinkRecordField> allFields;
 
   private FieldsMetadata(
-      Set<String> keyFieldNames,
-      Set<String> nonKeyFieldNames,
-      Map<String, SinkRecordField> allFields
+          Set<String> keyFieldNames,
+          Set<String> nonKeyFieldNames,
+          Set<String> nonKeyFieldNamesExpandedForCompositeTypes,
+          Map<String, SinkRecordField> allFields
   ) {
     boolean fieldCountsMatch = (keyFieldNames.size() + nonKeyFieldNames.size() == allFields.size());
     boolean allFieldsContained = (allFields.keySet().containsAll(keyFieldNames)
-                   && allFields.keySet().containsAll(nonKeyFieldNames));
+            && allFields.keySet().containsAll(nonKeyFieldNames));
     if (!fieldCountsMatch || !allFieldsContained) {
       throw new IllegalArgumentException(String.format(
-          "Validation fail -- keyFieldNames:%s nonKeyFieldNames:%s allFields:%s",
-          keyFieldNames, nonKeyFieldNames, allFields
+              "Validation fail -- keyFieldNames:%s nonKeyFieldNames:%s allFields:%s",
+              keyFieldNames, nonKeyFieldNames, allFields
       ));
     }
     this.keyFieldNames = keyFieldNames;
     this.nonKeyFieldNames = nonKeyFieldNames;
+    this.nonKeyFieldNamesExpandedForCompositeTypes = nonKeyFieldNamesExpandedForCompositeTypes;
     this.allFields = allFields;
   }
 
@@ -106,6 +109,8 @@ public class FieldsMetadata {
     }
 
     final Set<String> nonKeyFieldNames = new LinkedHashSet<>();
+    final Set<String> nonKeyFieldNamesExpandedForCompositeTypes = new LinkedHashSet<>();
+
     if (valueSchema != null) {
       for (Field field : valueSchema.fields()) {
         if (keyFieldNames.contains(field.name())) {
@@ -116,14 +121,17 @@ public class FieldsMetadata {
         }
 
         if (field.schema().type().equals(Schema.Type.STRUCT)) {
-
+          for (final Field nestedField : field.schema().fields()) {
+            nonKeyFieldNamesExpandedForCompositeTypes.add(field.name() + "." + nestedField.name());
+          }
         }
         else {
-            nonKeyFieldNames.add(field.name());
-
-            final Schema fieldSchema = field.schema();
-            allFields.put(field.name(), new SinkRecordField(fieldSchema, field.name(), false));
+          nonKeyFieldNames.add(field.name());
+          nonKeyFieldNamesExpandedForCompositeTypes.add(field.name());
         }
+
+        final Schema fieldSchema = field.schema();
+        allFields.put(field.name(), new SinkRecordField(fieldSchema, field.name(), false));
       }
     }
 
@@ -133,7 +141,7 @@ public class FieldsMetadata {
       );
     }
 
-    return new FieldsMetadata(keyFieldNames, nonKeyFieldNames, allFields);
+    return new FieldsMetadata(keyFieldNames, nonKeyFieldNames, nonKeyFieldNamesExpandedForCompositeTypes, allFields);
   }
 
   private static void extractKafkaPk(

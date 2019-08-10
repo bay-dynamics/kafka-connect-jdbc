@@ -15,6 +15,8 @@
 
 package io.confluent.connect.jdbc.sink;
 
+import java.io.UnsupportedEncodingException;
+import java.net.MalformedURLException;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -24,6 +26,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
+import java.net.URL;
+import java.net.URLDecoder;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.function.Function;
 
 import io.confluent.connect.jdbc.source.JdbcSourceConnectorConfig;
 
@@ -38,6 +45,9 @@ import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.config.types.Password;
+
+import static java.util.stream.Collectors.mapping;
+import static java.util.stream.Collectors.toList;
 
 public class JdbcSinkConfig extends AbstractConfig {
 
@@ -103,6 +113,13 @@ public class JdbcSinkConfig extends AbstractConfig {
       "Specifies how many records to attempt to batch together for insertion into the destination"
       + " table, when possible.";
   private static final String BATCH_SIZE_DISPLAY = "Batch Size";
+
+  public static final String BATCH_KEY_DEDUP = "batch.key.dedup";
+  private static final String BATCH_KEY_DEDUP_DEFAULT = "false";
+  private static final String BATCH_KEY_DEDUP_DOC =
+      "Specify if records should be deduplicated within a kafka poll batch, only retaining for insertion"
+      + " the latest occurrence of a record by key.";
+  private static final String BATCH_KEY_DEDUP_DISPLAY = "Batch Key Deduplication";
 
   public static final String DELETE_ENABLED = "delete.enabled";
   private static final String DELETE_ENABLED_DEFAULT = "false";
@@ -302,6 +319,16 @@ public class JdbcSinkConfig extends AbstractConfig {
             DELETE_ENABLED_DISPLAY,
             DeleteEnabledRecommender.INSTANCE
         )
+        .define(
+            BATCH_KEY_DEDUP,
+            ConfigDef.Type.STRING,
+            BATCH_KEY_DEDUP_DEFAULT,
+            ConfigDef.Importance.MEDIUM,
+            BATCH_SIZE_DOC, WRITES_GROUP,
+            4,
+            ConfigDef.Width.SHORT,
+            BATCH_SIZE_DISPLAY
+        )
         // Data Mapping
         .define(
             TABLE_NAME_FORMAT,
@@ -418,10 +445,13 @@ public class JdbcSinkConfig extends AbstractConfig {
         );
 
   public final String connectionUrl;
+  public final JdbcConnectionConfig jdbcConnectionConfig;
+
   public final String connectionUser;
   public final String connectionPassword;
   public final String tableNameFormat;
   public final int batchSize;
+  public final boolean batchKeyDedup;
   public final boolean deleteEnabled;
   public final int maxRetries;
   public final int retryBackoffMs;
@@ -436,11 +466,15 @@ public class JdbcSinkConfig extends AbstractConfig {
 
   public JdbcSinkConfig(Map<?, ?> props) {
     super(CONFIG_DEF, props);
+
     connectionUrl = getString(CONNECTION_URL);
+    jdbcConnectionConfig = JdbcConnectionConfig.parse(connectionUrl);
+
     connectionUser = getString(CONNECTION_USER);
     connectionPassword = getPasswordValue(CONNECTION_PASSWORD);
     tableNameFormat = getString(TABLE_NAME_FORMAT).trim();
     batchSize = getInt(BATCH_SIZE);
+    batchKeyDedup = getBoolean(BATCH_KEY_DEDUP);
     deleteEnabled = getBoolean(DELETE_ENABLED);
     maxRetries = getInt(MAX_RETRIES);
     retryBackoffMs = getInt(RETRY_BACKOFF_MS);
@@ -499,6 +533,7 @@ public class JdbcSinkConfig extends AbstractConfig {
     public String toString() {
       return canonicalValues.toString();
     }
+
   }
 
   public static void main(String... args) {

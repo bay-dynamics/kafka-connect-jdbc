@@ -18,6 +18,8 @@ package io.confluent.connect.jdbc.util;
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
 import io.confluent.connect.jdbc.dialect.DropOptions;
 
+import java.lang.StringBuilder;
+
 /**
  * A class that can be used to build SQL expressions. A builder can be created with
  * {@link IdentifierRules} that dictate the quote characters and identifier delimiter,
@@ -225,6 +227,37 @@ public class ExpressionBuilder {
       builder.appendColumnName(input.name());
     };
   }
+
+  /**
+   * Get a {@link Transform} that will convert to snake case the input column name
+   *
+   * @return the transform; never null
+   */
+  public static Transform<ColumnId> columnNamesInSnakeCase() {
+    return (builder, input) -> {
+      String camelOrPascalCase = input.name();
+      if (camelOrPascalCase == null || camelOrPascalCase.isEmpty()) {
+        builder.append(camelOrPascalCase);
+      }
+      else {
+        for (int i = 0; i < camelOrPascalCase.length(); i++) {
+          if (camelOrPascalCase.charAt(i) == '.') {
+            builder.append(camelOrPascalCase.charAt(++i));
+            builder.append(Character.toLowerCase(camelOrPascalCase.charAt(i)));
+          }
+          for (int j = i; j < camelOrPascalCase.length(); j++) {
+            if (!Character.isUpperCase(camelOrPascalCase.charAt(j))) {
+              builder.append("_");
+              builder.append(Character.toLowerCase(camelOrPascalCase.charAt(j)));
+            } else {
+              builder.append(camelOrPascalCase.charAt(j));
+            }
+          }
+        }
+      }
+    };
+  }
+
 
   /**
    * Create a new ExpressionBuilder using the default {@link IdentifierRules}.

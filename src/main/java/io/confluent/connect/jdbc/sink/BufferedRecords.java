@@ -16,6 +16,7 @@
 package io.confluent.connect.jdbc.sink;
 
 import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.slf4j.Logger;
@@ -25,11 +26,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
+import java.util.concurrent.Callable;
+import java.util.function.Function;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
@@ -52,7 +52,9 @@ public class BufferedRecords {
   private final DbStructure dbStructure;
   private final Connection connection;
 
-  private List<SinkRecord> records = new ArrayList<>();
+  //private List<SinkRecord> records = new ArrayList<>();
+  RecordDeduper<Struct, SinkRecord> records;
+
   private Schema keySchema;
   private Schema valueSchema;
   private FieldsMetadata fieldsMetadata;
@@ -61,6 +63,44 @@ public class BufferedRecords {
   private StatementBinder updateStatementBinder;
   private StatementBinder deleteStatementBinder;
   private boolean deletesInBatch = false;
+
+  private class RecordDeduper<K, V>
+  {
+    private LinkedHashMap<K, V> recordByKeys;
+    private ArrayList<V> allRecords;
+    private BiConsumer<K, V> doAdd;
+    private Callable<Integer> doSize;
+
+    RecordDeduper(boolean doDedup) {
+      if (doDedup) {
+        recordByKeys = new LinkedHashMap(config.batchSize, 1f, false); // init for worst case no dupe, accessOrder in insertion-order
+        doAdd = (key, record) -> {
+            recordByKeys.merge(key, record, (k, v) -> v );
+          };
+        doSize = () -> recordByKeys.size();
+      }
+      else {
+        allRecords = new ArrayList<V>();
+        doAdd = (key, record) -> {
+          allRecords.add(record);
+        };
+        doSize = () -> allRecords.size();
+      }
+    }
+
+    void add(K key, V record) {
+      doAdd.accept(key, record);
+    }
+
+    Integer size() {
+      try {
+        return doSize.call();
+      }
+      catch (Exception e) {
+        return -1;
+      }
+    }
+  }
 
   public BufferedRecords(
       JdbcSinkConfig config,
@@ -74,9 +114,11 @@ public class BufferedRecords {
     this.dbDialect = dbDialect;
     this.dbStructure = dbStructure;
     this.connection = connection;
+
+     records = new RecordDeduper(this.config.batchKeyDedup);
   }
 
-  public List<SinkRecord> add(SinkRecord record) throws SQLException {
+  public List<SinkRecord> add(Struct key, SinkRecord record) throws SQLException {
     final List<SinkRecord> flushed = new ArrayList<>();
 
     boolean schemaChanged = false;
@@ -118,12 +160,16 @@ public class BufferedRecords {
           config.fieldsWhitelist,
           schemaPair
       );
-      dbStructure.createOrAmendIfNecessary(
-          config,
-          connection,
-          tableId,
-          fieldsMetadata
-      );
+
+      if (config.autoEvolve || config.autoCreate) {
+        dbStructure.createOrAmendIfNecessary(
+            config,
+            connection,
+            tableId,
+            fieldsMetadata
+        );
+      }
+
       final String insertSql = getInsertSql();
       final String deleteSql = getDeleteSql();
       log.debug(
@@ -153,7 +199,13 @@ public class BufferedRecords {
         );
       }
     }
-    records.add(record);
+
+    if (config.batchKeyDedup) {
+
+    }
+    else {
+      records.add(key, record);
+    }
 
     if (records.size() >= config.batchSize) {
       flushed.addAll(flush());
@@ -183,12 +235,19 @@ public class BufferedRecords {
     );
     if (totalUpdateCount.filter(total -> total != expectedCount).isPresent()
         && config.insertMode == INSERT) {
-      throw new ConnectException(String.format(
-          "Update count (%d) did not sum up to total number of records inserted (%d)",
-          totalUpdateCount.get(),
-          expectedCount
-      ));
+      if (!config.jdbcConnectionConfig.reWriteBatchedInserts()) {
+        // if reWriteBatchedInserts then the returned statement count would not match the expected count
+        throw new ConnectException(String.format(
+            "Update count (%d) did not sum up to total number of records inserted (%d)",
+            totalUpdateCount.get(),
+            expectedCount
+        ));
+      }
+      else {
+        log.trace("With JDBC reWriteBatchedInserts=true expected Count is not validated with batch INSERT count.");
+      }
     }
+
     if (!totalUpdateCount.isPresent()) {
       log.info(
           "{} records:{} , but no count of the number of rows it affected is available",
