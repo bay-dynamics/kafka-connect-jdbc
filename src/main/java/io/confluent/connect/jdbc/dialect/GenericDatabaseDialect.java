@@ -62,6 +62,7 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import io.confluent.connect.jdbc.dialect.DatabaseDialectProvider.FixedScoreProvider;
 import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
@@ -89,10 +90,12 @@ import io.confluent.connect.jdbc.util.QuoteMethod;
 import io.confluent.connect.jdbc.util.TableDefinition;
 import io.confluent.connect.jdbc.util.TableId;
 
+import javax.ws.rs.NotSupportedException;
+
 /**
  * A {@link DatabaseDialect} implementation that provides functionality based upon JDBC and SQL.
  *
- * <p>This class is designed to be extended as required to customize the behavior for a specific
+ * <p>This class is designed to be extended as required to customize the behavior (a specific
  * DBMS. For example, override the {@link #createColumnConverter(ColumnMapping)} method to customize
  * how a column value is converted to a field value for use in a {@link Struct}. To also change the
  * field's type or schema, also override the {@link #addFieldToSchema} method.
@@ -1349,6 +1352,18 @@ public class GenericDatabaseDialect implements DatabaseDialect {
 
   @Override
   public String buildInsertStatement(
+      TableId tableId,
+      FieldsMetadata fieldsMetadata
+  ) {
+    return buildInsertStatement(
+        tableId,
+        asColumns(tableId, fieldsMetadata.keyFieldNames),
+        asColumns(tableId, fieldsMetadata.nonKeyFieldNames)
+    );
+  }
+
+  @Override
+  public String buildInsertStatement(
       TableId table,
       Collection<ColumnId> keyColumns,
       Collection<ColumnId> nonKeyColumns
@@ -1365,6 +1380,18 @@ public class GenericDatabaseDialect implements DatabaseDialect {
     builder.appendMultiple(",", "?", keyColumns.size() + nonKeyColumns.size());
     builder.append(")");
     return builder.toString();
+  }
+
+  @Override
+  public String buildUpdateStatement(
+      TableId tableId,
+      FieldsMetadata fieldsMetadata
+  ) {
+    return buildUpdateStatement(
+        tableId,
+        asColumns(tableId, fieldsMetadata.keyFieldNames),
+        asColumns(tableId, fieldsMetadata.nonKeyFieldNames)
+    );
   }
 
   @Override
@@ -1389,6 +1416,18 @@ public class GenericDatabaseDialect implements DatabaseDialect {
              .of(keyColumns);
     }
     return builder.toString();
+  }
+
+  @Override
+  public String buildUpsertQueryStatement(
+    TableId tableId,
+    FieldsMetadata fieldsMetadata
+  ) {
+    return buildUpsertQueryStatement(
+        tableId,
+        asColumns(tableId, fieldsMetadata.keyFieldNames),
+        asColumns(tableId, fieldsMetadata.nonKeyFieldNames)
+    );
   }
 
   @Override
@@ -1454,6 +1493,16 @@ public class GenericDatabaseDialect implements DatabaseDialect {
         throw new ConnectException("Unsupported source data type: " + schema.type());
       }
     }
+  }
+
+  @Override
+  public int bindCompositeField(
+      PreparedStatement statement,
+      int startIndex,
+      Schema schema,
+      Struct value
+  ) throws SQLException {
+    throw new UnsupportedOperationException();
   }
 
   protected boolean maybeBindPrimitive(
@@ -1750,4 +1799,11 @@ public class GenericDatabaseDialect implements DatabaseDialect {
   public String toString() {
     return name();
   }
+
+  protected Collection<ColumnId> asColumns(TableId tableId, Collection<String> names) {
+    return names.stream()
+      .map(name -> new ColumnId(tableId, name))
+      .collect(Collectors.toList());
+  }
+
 }

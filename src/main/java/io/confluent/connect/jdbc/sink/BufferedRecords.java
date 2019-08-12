@@ -25,11 +25,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
@@ -53,6 +49,8 @@ public class BufferedRecords {
   private final Connection connection;
 
   private List<SinkRecord> records = new ArrayList<>();
+  private HashMap<Object, Integer> keyToRecordIdx;
+
   private Schema keySchema;
   private Schema valueSchema;
   private FieldsMetadata fieldsMetadata;
@@ -74,6 +72,10 @@ public class BufferedRecords {
     this.dbDialect = dbDialect;
     this.dbStructure = dbStructure;
     this.connection = connection;
+
+    if (config.batchKeyDedup) {
+      keyToRecordIdx = new HashMap<Object, Integer>();
+    }
   }
 
   public List<SinkRecord> add(SinkRecord record) throws SQLException {
@@ -118,12 +120,16 @@ public class BufferedRecords {
           config.fieldsWhitelist,
           schemaPair
       );
-      dbStructure.createOrAmendIfNecessary(
-          config,
-          connection,
-          tableId,
-          fieldsMetadata
-      );
+
+      if (config.autoEvolve || config.autoCreate) {
+        dbStructure.createOrAmendIfNecessary(
+            config,
+            connection,
+            tableId,
+            fieldsMetadata
+        );
+      }
+
       final String insertSql = getInsertSql();
       final String deleteSql = getDeleteSql();
       log.debug(
@@ -153,7 +159,19 @@ public class BufferedRecords {
         );
       }
     }
-    records.add(record);
+
+    if (config.batchKeyDedup) {
+      if (keyToRecordIdx.containsKey(record.key())) {
+        records.set(keyToRecordIdx.get(record.key()), record);
+      }
+      else {
+        keyToRecordIdx.put(record.key(), records.size());
+        records.add(record);
+      }
+    }
+    else {
+      records.add(record);
+    }
 
     if (records.size() >= config.batchSize) {
       flushed.addAll(flush());
@@ -163,6 +181,11 @@ public class BufferedRecords {
 
   public List<SinkRecord> flush() throws SQLException {
     if (records.isEmpty()) {
+
+      if (config.batchKeyDedup) {
+        keyToRecordIdx = new HashMap<Object, Integer>();
+      }
+
       log.debug("Records is empty");
       return new ArrayList<>();
     }
@@ -183,12 +206,19 @@ public class BufferedRecords {
     );
     if (totalUpdateCount.filter(total -> total != expectedCount).isPresent()
         && config.insertMode == INSERT) {
-      throw new ConnectException(String.format(
-          "Update count (%d) did not sum up to total number of records inserted (%d)",
-          totalUpdateCount.get(),
-          expectedCount
-      ));
+      if (!config.jdbcConnectionConfig.reWriteBatchedInserts()) {
+        // if reWriteBatchedInserts then the returned statement count would not match the expected count
+        throw new ConnectException(String.format(
+            "Update count (%d) did not sum up to total number of records inserted (%d)",
+            totalUpdateCount.get(),
+            expectedCount
+        ));
+      }
+      else {
+        log.trace("With JDBC reWriteBatchedInserts=true expected Count is not validated with batch INSERT count.");
+      }
     }
+
     if (!totalUpdateCount.isPresent()) {
       log.info(
           "{} records:{} , but no count of the number of rows it affected is available",
@@ -198,6 +228,11 @@ public class BufferedRecords {
     }
 
     final List<SinkRecord> flushedRecords = records;
+
+    if (config.batchKeyDedup) {
+      keyToRecordIdx = new HashMap<Object, Integer>();
+    }
+
     records = new ArrayList<>();
     deletesInBatch = false;
     return flushedRecords;
@@ -259,8 +294,7 @@ public class BufferedRecords {
       case INSERT:
         return dbDialect.buildInsertStatement(
             tableId,
-            asColumns(fieldsMetadata.keyFieldNames),
-            asColumns(fieldsMetadata.nonKeyFieldNames)
+            fieldsMetadata
         );
       case UPSERT:
         if (fieldsMetadata.keyFieldNames.isEmpty()) {
@@ -273,8 +307,7 @@ public class BufferedRecords {
         try {
           return dbDialect.buildUpsertQueryStatement(
               tableId,
-              asColumns(fieldsMetadata.keyFieldNames),
-              asColumns(fieldsMetadata.nonKeyFieldNames)
+              fieldsMetadata
           );
         } catch (UnsupportedOperationException e) {
           throw new ConnectException(String.format(
@@ -286,8 +319,7 @@ public class BufferedRecords {
       case UPDATE:
         return dbDialect.buildUpdateStatement(
             tableId,
-            asColumns(fieldsMetadata.keyFieldNames),
-            asColumns(fieldsMetadata.nonKeyFieldNames)
+            fieldsMetadata
         );
       default:
         throw new ConnectException("Invalid insert mode");

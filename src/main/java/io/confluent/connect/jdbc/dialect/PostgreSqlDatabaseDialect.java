@@ -15,10 +15,13 @@
 
 package io.confluent.connect.jdbc.dialect;
 
+import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.connect.data.Date;
 import org.apache.kafka.connect.data.Decimal;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Time;
 import org.apache.kafka.connect.data.Timestamp;
@@ -217,6 +220,21 @@ public class PostgreSqlDatabaseDialect extends GenericDatabaseDialect {
   }
 
   @Override
+  public int bindCompositeField(
+          PreparedStatement statement,
+          int startIndex,
+          Schema schema,
+          Struct value
+  ) throws SQLException {
+    int lastIndex = startIndex;
+    // not recursive!
+    for (final Field nestedField : schema.fields()) {
+      bindField(statement, lastIndex++, nestedField.schema(), value.get(nestedField));
+    }
+    return lastIndex;
+  }
+
+  @Override
   public String buildUpsertQueryStatement(
       TableId table,
       Collection<ColumnId> keyColumns,
@@ -254,5 +272,4 @@ public class PostgreSqlDatabaseDialect extends GenericDatabaseDialect {
     }
     return builder.toString();
   }
-
 }

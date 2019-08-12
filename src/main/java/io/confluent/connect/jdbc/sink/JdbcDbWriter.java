@@ -15,8 +15,11 @@
 
 package io.confluent.connect.jdbc.sink;
 
+import io.confluent.connect.jdbc.util.StringUtils;
+
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
+import org.apache.kafka.connect.data.Field;
 
 import java.sql.Connection;
 import java.sql.SQLException;

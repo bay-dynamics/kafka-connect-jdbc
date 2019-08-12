@@ -16,8 +16,11 @@
 package io.confluent.connect.jdbc.sink.metadata;
 
 import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.Field;
 
 import java.util.Map;
+import java.util.Collection;
+import java.util.stream.Collectors;
 
 public class SinkRecordField {
 
@@ -43,8 +46,12 @@ public class SinkRecordField {
     return schema.type();
   }
 
-  public String name() {
-    return name;
+  public boolean isCompositeType() { return schemaType().equals(Schema.Type.STRUCT); }
+
+  public String name() { return name; }
+
+  public Collection<String> fieldNamesForCompositeType() {
+    return schema.fields().stream().map(Field::name).collect(Collectors.toList());
   }
 
   public boolean isOptional() {
