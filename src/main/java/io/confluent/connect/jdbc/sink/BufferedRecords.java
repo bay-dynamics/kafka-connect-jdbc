@@ -16,7 +16,6 @@
 package io.confluent.connect.jdbc.sink;
 
 import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.slf4j.Logger;
@@ -27,9 +26,6 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.function.Function;
-import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
@@ -52,8 +48,8 @@ public class BufferedRecords {
   private final DbStructure dbStructure;
   private final Connection connection;
 
-  //private List<SinkRecord> records = new ArrayList<>();
-  RecordDeduper<Struct, SinkRecord> records;
+  private List<SinkRecord> records = new ArrayList<>();
+  private HashMap<Object, Integer> keyToRecordIdx;
 
   private Schema keySchema;
   private Schema valueSchema;
@@ -63,44 +59,6 @@ public class BufferedRecords {
   private StatementBinder updateStatementBinder;
   private StatementBinder deleteStatementBinder;
   private boolean deletesInBatch = false;
-
-  private class RecordDeduper<K, V>
-  {
-    private LinkedHashMap<K, V> recordByKeys;
-    private ArrayList<V> allRecords;
-    private BiConsumer<K, V> doAdd;
-    private Callable<Integer> doSize;
-
-    RecordDeduper(boolean doDedup) {
-      if (doDedup) {
-        recordByKeys = new LinkedHashMap(config.batchSize, 1f, false); // init for worst case no dupe, accessOrder in insertion-order
-        doAdd = (key, record) -> {
-            recordByKeys.merge(key, record, (k, v) -> v );
-          };
-        doSize = () -> recordByKeys.size();
-      }
-      else {
-        allRecords = new ArrayList<V>();
-        doAdd = (key, record) -> {
-          allRecords.add(record);
-        };
-        doSize = () -> allRecords.size();
-      }
-    }
-
-    void add(K key, V record) {
-      doAdd.accept(key, record);
-    }
-
-    Integer size() {
-      try {
-        return doSize.call();
-      }
-      catch (Exception e) {
-        return -1;
-      }
-    }
-  }
 
   public BufferedRecords(
       JdbcSinkConfig config,
@@ -115,10 +73,12 @@ public class BufferedRecords {
     this.dbStructure = dbStructure;
     this.connection = connection;
 
-     records = new RecordDeduper(this.config.batchKeyDedup);
+    if (config.batchKeyDedup) {
+      keyToRecordIdx = new HashMap<Object, Integer>();
+    }
   }
 
-  public List<SinkRecord> add(Struct key, SinkRecord record) throws SQLException {
+  public List<SinkRecord> add(SinkRecord record) throws SQLException {
     final List<SinkRecord> flushed = new ArrayList<>();
 
     boolean schemaChanged = false;
@@ -201,10 +161,16 @@ public class BufferedRecords {
     }
 
     if (config.batchKeyDedup) {
-
+      if (keyToRecordIdx.containsKey(record.key())) {
+        records.set(keyToRecordIdx.get(record.key()), record);
+      }
+      else {
+        keyToRecordIdx.put(record.key(), records.size());
+        records.add(record);
+      }
     }
     else {
-      records.add(key, record);
+      records.add(record);
     }
 
     if (records.size() >= config.batchSize) {
@@ -215,6 +181,11 @@ public class BufferedRecords {
 
   public List<SinkRecord> flush() throws SQLException {
     if (records.isEmpty()) {
+
+      if (config.batchKeyDedup) {
+        keyToRecordIdx = new HashMap<Object, Integer>();
+      }
+
       log.debug("Records is empty");
       return new ArrayList<>();
     }
@@ -257,6 +228,11 @@ public class BufferedRecords {
     }
 
     final List<SinkRecord> flushedRecords = records;
+
+    if (config.batchKeyDedup) {
+      keyToRecordIdx = new HashMap<Object, Integer>();
+    }
+
     records = new ArrayList<>();
     deletesInBatch = false;
     return flushedRecords;

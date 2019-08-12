@@ -119,7 +119,7 @@ public class JdbcSinkConfig extends AbstractConfig {
   private static final String BATCH_KEY_DEDUP_DOC =
       "Specify if records should be deduplicated within a kafka poll batch, only retaining for insertion"
       + " the latest occurrence of a record by key.";
-  private static final String BATCH_KEY_DEDUP_DISPLAY = "Batch Key Deduplication";
+  private static final String BATCH_KEY_DEDUP_DISPLAY = "Deduplicate Records with the same Kafka Key within a batch. Retain the latest in order.";
 
   public static final String DELETE_ENABLED = "delete.enabled";
   private static final String DELETE_ENABLED_DEFAULT = "false";
@@ -321,13 +321,13 @@ public class JdbcSinkConfig extends AbstractConfig {
         )
         .define(
             BATCH_KEY_DEDUP,
-            ConfigDef.Type.STRING,
+            ConfigDef.Type.BOOLEAN,
             BATCH_KEY_DEDUP_DEFAULT,
-            ConfigDef.Importance.MEDIUM,
+            ConfigDef.Importance.HIGH,
             BATCH_SIZE_DOC, WRITES_GROUP,
             4,
             ConfigDef.Width.SHORT,
-            BATCH_SIZE_DISPLAY
+            BATCH_KEY_DEDUP_DISPLAY
         )
         // Data Mapping
         .define(
