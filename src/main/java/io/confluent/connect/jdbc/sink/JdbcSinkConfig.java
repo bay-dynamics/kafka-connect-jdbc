@@ -12,6 +12,20 @@
  * WARRANTIES OF ANY KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations under the License.
  */
+/*
+ * Copyright 2018 Confluent Inc.
+ *
+ * Licensed under the Confluent Community License (the "License"); you may not use
+ * this file except in compliance with the License.  You may obtain a copy of the
+ * License at
+ *
+ * http://www.confluent.io/confluent-community-license
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OF ANY KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations under the License.
+ */
 
 package io.confluent.connect.jdbc.sink;
 
@@ -55,7 +69,6 @@ public class JdbcSinkConfig extends AbstractConfig {
     INSERT,
     UPSERT,
     UPDATE;
-
   }
 
   public enum PrimaryKeyMode {
@@ -64,6 +77,12 @@ public class JdbcSinkConfig extends AbstractConfig {
     RECORD_KEY,
     RECORD_VALUE;
   }
+
+  public enum ColumnCaseType {
+    DEFAULT,
+    SNAKE_CASE
+  }
+
 
   public static final List<String> DEFAULT_KAFKA_PK_NAMES = Collections.unmodifiableList(
       Arrays.asList(
@@ -94,6 +113,11 @@ public class JdbcSinkConfig extends AbstractConfig {
       + "For example, ``kafka_${topic}`` for the topic 'orders' will map to the table name "
       + "'kafka_orders'.";
   private static final String TABLE_NAME_FORMAT_DISPLAY = "Table Name Format";
+
+  public static final String TABLE_COLUMNS_CASE_TYPE = "table.columns.case.type";
+  public static final String TABLE_COLUMNS_CASE_TYPE_DEFAULT = "DEFAULT";
+  private static final String TABLE_COLUMNS_CASE_TYPE_DOC = "A case type for writing the schema names with the destination column names case type.";
+  private static final String TABLE_COLUMNS_CASE_TYPE_DISPLAY = "Case Type";
 
   public static final String MAX_RETRIES = "max.retries";
   private static final int MAX_RETRIES_DEFAULT = 10;
@@ -386,6 +410,18 @@ public class JdbcSinkConfig extends AbstractConfig {
           ConfigDef.Width.MEDIUM,
           DB_TIMEZONE_CONFIG_DISPLAY
         )
+        .define(
+          TABLE_COLUMNS_CASE_TYPE,
+          ConfigDef.Type.STRING,
+          TABLE_COLUMNS_CASE_TYPE_DEFAULT,
+          EnumValidator.in(ColumnCaseType.values()),
+          ConfigDef.Importance.LOW,
+          TABLE_COLUMNS_CASE_TYPE_DOC,
+          DATAMAPPING_GROUP,
+          1,
+          ConfigDef.Width.SHORT,
+          TABLE_COLUMNS_CASE_TYPE_DISPLAY
+        )
         // DDL
         .define(
             AUTO_CREATE,
@@ -464,6 +500,8 @@ public class JdbcSinkConfig extends AbstractConfig {
   public final String dialectName;
   public final TimeZone timeZone;
 
+  public final ColumnCaseType columnCaseType;
+
   public JdbcSinkConfig(Map<?, ?> props) {
     super(CONFIG_DEF, props);
 
@@ -473,6 +511,7 @@ public class JdbcSinkConfig extends AbstractConfig {
     connectionUser = getString(CONNECTION_USER);
     connectionPassword = getPasswordValue(CONNECTION_PASSWORD);
     tableNameFormat = getString(TABLE_NAME_FORMAT).trim();
+    columnCaseType = ColumnCaseType.valueOf(getString(TABLE_COLUMNS_CASE_TYPE).trim().toUpperCase());
     batchSize = getInt(BATCH_SIZE);
     batchKeyDedup = getBoolean(BATCH_KEY_DEDUP);
     deleteEnabled = getBoolean(DELETE_ENABLED);

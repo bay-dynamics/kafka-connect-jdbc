@@ -60,7 +60,7 @@ public abstract class BaseDialectTypeTest<T extends GenericDatabaseDialect> {
   public static final boolean NOT_NULLABLE = false;
 
   public static final TableId TABLE_ID = new TableId(null, null, "MyTable");
-  public static final ColumnId COLUMN_ID = new ColumnId(TABLE_ID, "columnA", "aliasA");
+  public static final ColumnId COLUMN_ID = new ColumnId(TABLE_ID, "columnA", "aliasA", JdbcSinkConfig.ColumnCaseType.DEFAULT);
 
   public static final BigDecimal BIG_DECIMAL = new BigDecimal(9.9);
   public static final long LONG = Long.MAX_VALUE;

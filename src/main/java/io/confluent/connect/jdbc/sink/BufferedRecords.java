@@ -357,7 +357,7 @@ public class BufferedRecords {
 
   private Collection<ColumnId> asColumns(Collection<String> names) {
     return names.stream()
-        .map(name -> new ColumnId(tableId, name))
+        .map(name -> new ColumnId(tableId, name, config.columnCaseType))
         .collect(Collectors.toList());
   }
 }

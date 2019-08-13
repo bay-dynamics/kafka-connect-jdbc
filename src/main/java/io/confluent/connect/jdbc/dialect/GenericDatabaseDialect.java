@@ -139,6 +139,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
   private final Queue<Connection> connections = new ConcurrentLinkedQueue<>();
   private volatile JdbcDriverInfo jdbcDriverInfo;
   private final TimeZone timeZone;
+  private final JdbcSinkConfig.ColumnCaseType columnCaseType;
 
   /**
    * Create a new dialect instance with the given connector configuration.
@@ -170,6 +171,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
       quoteSqlIdentifiers = QuoteMethod.get(
           config.getString(JdbcSinkConfig.QUOTE_SQL_IDENTIFIERS_CONFIG)
       );
+      columnCaseType = ((JdbcSinkConfig) config).columnCaseType;
     } else {
       catalogPattern = config.getString(JdbcSourceTaskConfig.CATALOG_PATTERN_CONFIG);
       schemaPattern = config.getString(JdbcSourceTaskConfig.SCHEMA_PATTERN_CONFIG);
@@ -177,6 +179,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
       quoteSqlIdentifiers = QuoteMethod.get(
           config.getString(JdbcSourceConnectorConfig.QUOTE_SQL_IDENTIFIERS_CONFIG)
       );
+      columnCaseType = JdbcSinkConfig.ColumnCaseType.valueOf(config.getString(JdbcSinkConfig.TABLE_COLUMNS_CASE_TYPE_DEFAULT).trim().toUpperCase()); // not applicable to source
     }
     if (config instanceof JdbcSourceConnectorConfig) {
       mapNumerics = ((JdbcSourceConnectorConfig)config).numericMapping();
@@ -574,7 +577,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
         final String tableName = rs.getString(3);
         final TableId tableId = new TableId(catalogName, schemaName, tableName);
         final String columnName = rs.getString(4);
-        final ColumnId columnId = new ColumnId(tableId, columnName, null);
+        final ColumnId columnId = new ColumnId(tableId, columnName, null, JdbcSinkConfig.ColumnCaseType.DEFAULT);
         final int jdbcType = rs.getInt(5);
         final String typeName = rs.getString(6);
         final int precision = rs.getInt(7);
@@ -667,7 +670,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
     TableId tableId = new TableId(catalog, schema, tableName);
     String name = rsMetadata.getColumnName(column);
     String alias = rsMetadata.getColumnLabel(column);
-    ColumnId id = new ColumnId(tableId, name, alias);
+    ColumnId id = new ColumnId(tableId, name, alias, columnCaseType);
     Nullability nullability;
     switch (rsMetadata.isNullable(column)) {
       case ResultSetMetaData.columnNullable:
@@ -1802,7 +1805,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
 
   protected Collection<ColumnId> asColumns(TableId tableId, Collection<String> names) {
     return names.stream()
-      .map(name -> new ColumnId(tableId, name))
+      .map(name -> new ColumnId(tableId, name, columnCaseType))
       .collect(Collectors.toList());
   }
 

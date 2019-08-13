@@ -17,6 +17,7 @@ package io.confluent.connect.jdbc.util;
 
 import java.util.Objects;
 
+import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
 import io.confluent.connect.jdbc.util.ExpressionBuilder.Expressable;
 
 public class ColumnId implements Expressable {
@@ -28,20 +29,37 @@ public class ColumnId implements Expressable {
 
   public ColumnId(
       TableId tableId,
-      String columnName
+      String columnName,
+      JdbcSinkConfig.ColumnCaseType columnCaseType
   ) {
-    this(tableId, columnName, null);
+    this(tableId, columnName, null, columnCaseType);
+  }
+
+  public ColumnId(
+          TableId tableId,
+          String columnName
+  ) {
+    this(tableId, columnName, null, JdbcSinkConfig.ColumnCaseType.DEFAULT);
   }
 
   public ColumnId(
       TableId tableId,
       String columnName,
-      String alias
+      String alias,
+      JdbcSinkConfig.ColumnCaseType columnCaseType
   ) {
     assert columnName != null;
     this.tableId = tableId;
-    this.name = columnName;
-    this.alias = alias != null && !alias.trim().isEmpty() ? alias : name;
+
+    if (columnCaseType.equals(JdbcSinkConfig.ColumnCaseType.SNAKE_CASE)) {
+      final String snaked = StringUtils.toSnakeCase(columnName);
+      this.name = snaked;
+      this.alias = alias != null && !alias.trim().isEmpty() ? StringUtils.toSnakeCase(alias) : snaked;
+    }
+    else {
+      this.name = columnName;
+      this.alias = alias != null && !alias.trim().isEmpty() ? alias : name;
+    }
     this.hash = Objects.hash(this.tableId, this.name);
   }
 

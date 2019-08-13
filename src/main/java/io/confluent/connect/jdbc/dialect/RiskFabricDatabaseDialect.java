@@ -41,7 +41,8 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
             FieldsMetadata fieldsMetadata
     ) {
         Collection<ColumnId> keyColumns = asColumns(table, fieldsMetadata.keyFieldNames);
-        Collection<ColumnId> nonKeyFieldNamesExpandedForCompositeTypes = asColumns(table, fieldsMetadata.nonKeyFieldNamesExpandedForCompositeTypes);
+        Collection<ColumnId> nonKeyFieldNames = asColumns(table, fieldsMetadata.nonKeyFieldNames);
+        //Collection<ColumnId> nonKeyFieldNamesExpandedForCompositeTypes = asColumns(table, fieldsMetadata.nonKeyFieldNamesExpandedForCompositeTypes);
 
         ExpressionBuilder builder = expressionBuilder();
         builder.append("INSERT INTO ");
@@ -50,9 +51,11 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
         builder.appendList()
                 .delimitedBy(",")
                 .transformedBy(ExpressionBuilder.columnNames())
-                .of(keyColumns, nonKeyFieldNamesExpandedForCompositeTypes);
+                .of(keyColumns, nonKeyFieldNames);
+                //.of(keyColumns, nonKeyFieldNamesExpandedForCompositeTypes);
         builder.append(") VALUES(");
-        builder.appendMultiple(",", "?", keyColumns.size() + nonKeyFieldNamesExpandedForCompositeTypes.size());
+        //builder.appendMultiple(",", "?", keyColumns.size() + nonKeyFieldNamesExpandedForCompositeTypes.size());
+        builder.appendMultiple(",", "?", keyColumns.size() + nonKeyFieldNames.size());
         builder.append(")");
         return builder.toString();
     }
@@ -63,7 +66,8 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
             FieldsMetadata fieldsMetadata
     ) {
         Collection<ColumnId> keyColumns = asColumns(table, fieldsMetadata.keyFieldNames);
-        Collection<ColumnId> nonKeyFieldNamesExpandedForCompositeTypes = asColumns(table, fieldsMetadata.nonKeyFieldNamesExpandedForCompositeTypes);
+        Collection<ColumnId> nonKeyFieldNames = asColumns(table, fieldsMetadata.nonKeyFieldNames);
+        //Collection<ColumnId> nonKeyFieldNamesExpandedForCompositeTypes = asColumns(table, fieldsMetadata.nonKeyFieldNamesExpandedForCompositeTypes);
 
         // by convention a "." in a column name in the RiskFabricDialect means the dot operator to read a composite type field
         // wrap expression in parenthesis (=EXCLUDED.column_name).field_name
@@ -98,22 +102,26 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
         builder.appendList()
                 .delimitedBy(",")
                 .transformedBy(ExpressionBuilder.columnNames())
-                .of(keyColumns, nonKeyFieldNamesExpandedForCompositeTypes);
+                //.of(keyColumns, nonKeyFieldNamesExpandedForCompositeTypes);
+                .of(keyColumns, nonKeyFieldNames);
         builder.append(") VALUES (");
-        builder.appendMultiple(",", "?", keyColumns.size() + nonKeyFieldNamesExpandedForCompositeTypes.size());
+        //builder.appendMultiple(",", "?", keyColumns.size() + nonKeyFieldNamesExpandedForCompositeTypes.size());
+        builder.appendMultiple(",", "?", keyColumns.size() + nonKeyFieldNames.size());
         builder.append(") ON CONFLICT (");
         builder.appendList()
                 .delimitedBy(",")
                 .transformedBy(ExpressionBuilder.columnNames())
                 .of(keyColumns);
-        if (nonKeyFieldNamesExpandedForCompositeTypes.isEmpty()) {
+        //if (nonKeyFieldNamesExpandedForCompositeTypes.isEmpty()) {
+        if (nonKeyFieldNames.isEmpty()) {
             builder.append(") DO NOTHING");
         } else {
             builder.append(") DO UPDATE SET ");
             builder.appendList()
                     .delimitedBy(",")
                     .transformedBy(transform)
-                    .of(nonKeyFieldNamesExpandedForCompositeTypes);
+                    .of(nonKeyFieldNames);
+                    //.of(nonKeyFieldNamesExpandedForCompositeTypes);
         }
         return builder.toString();
     }
