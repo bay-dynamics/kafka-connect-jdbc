@@ -17,6 +17,8 @@ package io.confluent.connect.jdbc.dialect;
 
 import java.time.ZoneOffset;
 import java.util.TimeZone;
+
+import io.confluent.connect.jdbc.sink.DbStructure;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.types.Password;
 import org.apache.kafka.connect.data.Date;
@@ -89,6 +91,8 @@ import io.confluent.connect.jdbc.util.JdbcDriverInfo;
 import io.confluent.connect.jdbc.util.QuoteMethod;
 import io.confluent.connect.jdbc.util.TableDefinition;
 import io.confluent.connect.jdbc.util.TableId;
+import io.confluent.connect.jdbc.sink.DbWriter;
+import io.confluent.connect.jdbc.sink.JdbcDbWriter;
 
 import javax.ws.rs.NotSupportedException;
 
@@ -199,6 +203,24 @@ public class GenericDatabaseDialect implements DatabaseDialect {
   @Override
   public String name() {
     return getClass().getSimpleName().replace("DatabaseDialect", "");
+  }
+
+  public DbWriter getDatabaseWriter() throws UnsupportedOperationException
+  {
+    if (config instanceof JdbcSinkConfig) {
+
+      JdbcSinkConfig sinkConfig = (JdbcSinkConfig)config;
+      if (sinkConfig.insertMode.equals(InsertMode.BULKCOPY)) {
+        log.error("{}=bulkcopy is not supported with dialect {}", JdbcSinkConfig.INSERT_MODE, this);
+        throw new UnsupportedOperationException();
+      }
+      else {
+        final DbStructure dbStructure = new DbStructure(this);
+        return new JdbcDbWriter((JdbcSinkConfig) config, this, dbStructure);
+      }
+    }
+
+    throw new UnsupportedOperationException();
   }
 
   @Override
@@ -1803,7 +1825,7 @@ public class GenericDatabaseDialect implements DatabaseDialect {
     return name();
   }
 
-  protected Collection<ColumnId> asColumns(TableId tableId, Collection<String> names) {
+  public Collection<ColumnId> asColumns(TableId tableId, Collection<String> names) {
     return names.stream()
       .map(name -> new ColumnId(tableId, name, columnCaseType))
       .collect(Collectors.toList());

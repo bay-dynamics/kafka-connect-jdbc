@@ -68,7 +68,8 @@ public class JdbcSinkConfig extends AbstractConfig {
   public enum InsertMode {
     INSERT,
     UPSERT,
-    UPDATE;
+    UPDATE,
+    BULKCOPY
   }
 
   public enum PrimaryKeyMode {
@@ -177,7 +178,10 @@ public class JdbcSinkConfig extends AbstractConfig {
       + "the connector, e.g. ``INSERT OR IGNORE``.\n"
       + "``update``\n"
       + "    Use the appropriate update semantics for the target database if it is supported by "
-      + "the connector, e.g. ``UPDATE``.";
+      + "the connector, e.g. ``UPDATE``.\n"
+      + "`bulkcopy`\n"
+      + "     Use the appropriate bulk copy semantics for the target database if it is supported by "
+      + "the connector, e.g. ``COPY``.\n";
   private static final String INSERT_MODE_DISPLAY = "Insert Mode";
 
   public static final String PK_FIELDS = "pk.fields";

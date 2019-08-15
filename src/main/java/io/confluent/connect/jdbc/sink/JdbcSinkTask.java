@@ -36,7 +36,7 @@ public class JdbcSinkTask extends SinkTask {
 
   DatabaseDialect dialect;
   JdbcSinkConfig config;
-  JdbcDbWriter writer;
+  DbWriter writer;
   int remainingRetries;
 
   @Override
@@ -55,7 +55,7 @@ public class JdbcSinkTask extends SinkTask {
     }
     final DbStructure dbStructure = new DbStructure(dialect);
     log.info("Initializing writer using SQL dialect: {}", dialect.getClass().getSimpleName());
-    writer = new JdbcDbWriter(config, dialect, dbStructure);
+    writer = dialect.getDatabaseWriter();
   }
 
   @Override

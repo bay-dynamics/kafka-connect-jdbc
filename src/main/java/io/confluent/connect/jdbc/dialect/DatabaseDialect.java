@@ -27,6 +27,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
+import io.confluent.connect.jdbc.sink.GenericDbWriter;
 import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
 import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
 import io.confluent.connect.jdbc.sink.metadata.SchemaPair;
@@ -40,6 +41,7 @@ import io.confluent.connect.jdbc.util.ExpressionBuilder;
 import io.confluent.connect.jdbc.util.IdentifierRules;
 import io.confluent.connect.jdbc.util.TableDefinition;
 import io.confluent.connect.jdbc.util.TableId;
+import io.confluent.connect.jdbc.sink.DbWriter;
 
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
@@ -131,6 +133,8 @@ public interface DatabaseDialect extends ConnectionProvider {
    * @return the dialect's name; never null
    */
   String name();
+
+  DbWriter getDatabaseWriter() throws UnsupportedOperationException;
 
   /**
    * Create a new prepared statement using the specified database connection.
