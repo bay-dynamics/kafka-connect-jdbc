@@ -32,13 +32,13 @@ public class FieldsMetadata {
 
   public final Set<String> keyFieldNames;
   public final Set<String> nonKeyFieldNames;
-  public final Set<String> nonKeyFieldNamesExpandedForCompositeTypes;
+  public final Set<String> nonKeyFieldNamesRaw;
   public final Map<String, SinkRecordField> allFields;
 
   private FieldsMetadata(
           Set<String> keyFieldNames,
           Set<String> nonKeyFieldNames,
-          Set<String> nonKeyFieldNamesExpandedForCompositeTypes,
+          Set<String> nonKeyFieldNamesRaw,
           Map<String, SinkRecordField> allFields
   ) {
     boolean fieldCountsMatch = (keyFieldNames.size() + nonKeyFieldNames.size() == allFields.size());
@@ -52,7 +52,7 @@ public class FieldsMetadata {
     }
     this.keyFieldNames = keyFieldNames;
     this.nonKeyFieldNames = nonKeyFieldNames;
-    this.nonKeyFieldNamesExpandedForCompositeTypes = nonKeyFieldNamesExpandedForCompositeTypes;
+    this.nonKeyFieldNamesRaw = nonKeyFieldNamesRaw;
     this.allFields = allFields;
   }
 
@@ -109,7 +109,7 @@ public class FieldsMetadata {
     }
 
     final Set<String> nonKeyFieldNames = new LinkedHashSet<>();
-    final Set<String> nonKeyFieldNamesExpandedForCompositeTypes = new LinkedHashSet<>();
+    final Set<String> nonKeyFieldNamesRaw = new LinkedHashSet<>();
 
     if (valueSchema != null) {
       for (Field field : valueSchema.fields()) {
@@ -120,18 +120,24 @@ public class FieldsMetadata {
           continue;
         }
 
+        nonKeyFieldNamesRaw.add(field.name());
+
+        //@TODO make flattening STRUCT optionl?
+
         if (field.schema().type().equals(Schema.Type.STRUCT)) {
+
           for (final Field nestedField : field.schema().fields()) {
-            nonKeyFieldNamesExpandedForCompositeTypes.add(field.name() + "." + nestedField.name());
+            String nestedFieldName = field.name() + "." + nestedField.name();
+            nonKeyFieldNames.add(nestedFieldName);
+            final Schema nestedFieldSchema = nestedField.schema();
+            allFields.put(nestedFieldName, new SinkRecordField(nestedFieldSchema, nestedFieldName, false));
           }
         }
         else {
           nonKeyFieldNames.add(field.name());
-          nonKeyFieldNamesExpandedForCompositeTypes.add(field.name());
+          final Schema fieldSchema = field.schema();
+          allFields.put(field.name(), new SinkRecordField(fieldSchema, field.name(), false));
         }
-
-        final Schema fieldSchema = field.schema();
-        allFields.put(field.name(), new SinkRecordField(fieldSchema, field.name(), false));
       }
     }
 
@@ -141,7 +147,7 @@ public class FieldsMetadata {
       );
     }
 
-    return new FieldsMetadata(keyFieldNames, nonKeyFieldNames, nonKeyFieldNamesExpandedForCompositeTypes, allFields);
+    return new FieldsMetadata(keyFieldNames, nonKeyFieldNames, nonKeyFieldNamesRaw, allFields);
   }
 
   private static void extractKafkaPk(

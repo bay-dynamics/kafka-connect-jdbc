@@ -79,7 +79,7 @@ public class BufferedRecords {
   }
 
   public List<SinkRecord> add(SinkRecord record) throws SQLException {
-    final List<SinkRecord> flushed = new ArrayList<>();
+      final List<SinkRecord> flushed = new ArrayList<>();
 
     boolean schemaChanged = false;
     if (!Objects.equals(keySchema, record.keySchema())) {
@@ -140,6 +140,7 @@ public class BufferedRecords {
           fieldsMetadata
       );
       close();
+
       updatePreparedStatement = dbDialect.createPreparedStatement(connection, insertSql);
       updateStatementBinder = dbDialect.statementBinder(
           updatePreparedStatement,
@@ -357,7 +358,7 @@ public class BufferedRecords {
 
   private Collection<ColumnId> asColumns(Collection<String> names) {
     return names.stream()
-        .map(name -> new ColumnId(tableId, name))
+        .map(name -> new ColumnId(tableId, name, config.columnCaseType))
         .collect(Collectors.toList());
   }
 }

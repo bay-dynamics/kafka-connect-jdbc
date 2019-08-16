@@ -69,21 +69,29 @@ public class StringUtils {
     }
 
     StringBuilder builder = new StringBuilder();
-    for (int i = 0; i < camelOrPascalCase.length(); i++) {
-      if (camelOrPascalCase.charAt(i) == '.') {
-        builder.append(camelOrPascalCase.charAt(++i));
-        builder.append(Character.toLowerCase(camelOrPascalCase.charAt(i)));
-      }
-      int j;
-      for (j = i; j < camelOrPascalCase.length(); j++) {
-        if (Character.isUpperCase(camelOrPascalCase.charAt(j))) {
-          builder.append("_");
-          builder.append(Character.toLowerCase(camelOrPascalCase.charAt(j)));
+    boolean uppercaseGroupStarted = true;
+    int max = camelOrPascalCase.length();
+    builder.append(Character.toLowerCase(camelOrPascalCase.charAt(0)));
+    for (int i = 1; i < max; i++) {
+      if (camelOrPascalCase.charAt(i) != '.') {
+        if (Character.isUpperCase(camelOrPascalCase.charAt(i))) {
+          if (!uppercaseGroupStarted || (i < max-2 && Character.isLowerCase(camelOrPascalCase.charAt(i+1)))) {
+            builder.append("_");
+            uppercaseGroupStarted = true;
+          }
+          builder.append(Character.toLowerCase(camelOrPascalCase.charAt(i)));
         } else {
-          builder.append(camelOrPascalCase.charAt(j));
+          uppercaseGroupStarted = false;
+          builder.append(camelOrPascalCase.charAt(i));
         }
       }
-      i = j;
+      else {
+        builder.append(camelOrPascalCase.charAt(i));
+        if (i<max-1) {
+          builder.append(Character.toLowerCase(camelOrPascalCase.charAt(++i)));
+          uppercaseGroupStarted = true;
+        }
+      }
     }
 
     return builder.toString();

@@ -9,4 +9,5 @@ io.confluent.connect.jdbc.dialect.SqlServerDatabaseDialect$Provider
 io.confluent.connect.jdbc.dialect.SapHanaDatabaseDialect$Provider
 io.confluent.connect.jdbc.dialect.SybaseDatabaseDialect$Provider
 io.confluent.connect.jdbc.dialect.VerticaDatabaseDialect$Provider
-io.confluent.connect.jdbc.dialect.RiskFabricDatabaseDialect$Provider
+com.baydynamics.riskfabric.connect.jdbc.dialect.RiskFabricDatabaseDialect$Provider
+

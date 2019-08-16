@@ -12,6 +12,20 @@
  * WARRANTIES OF ANY KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations under the License.
  */
+/*
+ * Copyright 2018 Confluent Inc.
+ *
+ * Licensed under the Confluent Community License (the "License"); you may not use
+ * this file except in compliance with the License.  You may obtain a copy of the
+ * License at
+ *
+ * http://www.confluent.io/confluent-community-license
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OF ANY KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations under the License.
+ */
 
 package io.confluent.connect.jdbc.sink;
 
@@ -54,8 +68,8 @@ public class JdbcSinkConfig extends AbstractConfig {
   public enum InsertMode {
     INSERT,
     UPSERT,
-    UPDATE;
-
+    UPDATE,
+    BULKCOPY
   }
 
   public enum PrimaryKeyMode {
@@ -64,6 +78,12 @@ public class JdbcSinkConfig extends AbstractConfig {
     RECORD_KEY,
     RECORD_VALUE;
   }
+
+  public enum ColumnCaseType {
+    DEFAULT,
+    SNAKE_CASE
+  }
+
 
   public static final List<String> DEFAULT_KAFKA_PK_NAMES = Collections.unmodifiableList(
       Arrays.asList(
@@ -94,6 +114,11 @@ public class JdbcSinkConfig extends AbstractConfig {
       + "For example, ``kafka_${topic}`` for the topic 'orders' will map to the table name "
       + "'kafka_orders'.";
   private static final String TABLE_NAME_FORMAT_DISPLAY = "Table Name Format";
+
+  public static final String TABLE_COLUMNS_CASE_TYPE = "table.columns.case.type";
+  public static final String TABLE_COLUMNS_CASE_TYPE_DEFAULT = "DEFAULT";
+  private static final String TABLE_COLUMNS_CASE_TYPE_DOC = "A case type for writing the schema names with the destination column names case type.";
+  private static final String TABLE_COLUMNS_CASE_TYPE_DISPLAY = "Case Type";
 
   public static final String MAX_RETRIES = "max.retries";
   private static final int MAX_RETRIES_DEFAULT = 10;
@@ -153,8 +178,18 @@ public class JdbcSinkConfig extends AbstractConfig {
       + "the connector, e.g. ``INSERT OR IGNORE``.\n"
       + "``update``\n"
       + "    Use the appropriate update semantics for the target database if it is supported by "
-      + "the connector, e.g. ``UPDATE``.";
+      + "the connector, e.g. ``UPDATE``.\n"
+      + "`bulkcopy`\n"
+      + "     Use the appropriate bulk copy semantics for the target database if it is supported by "
+      + "the connector, e.g. ``COPY``.\n";
   private static final String INSERT_MODE_DISPLAY = "Insert Mode";
+
+  public static final String INSERT_BULK_COPY_BUFFER_SIZE_BYTES = "insert.bulkcopy.buffer.size.bytes";
+  private static final int INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DEFAULT = 10000000;
+  private static final String INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DOC =
+      "Buffer size of the bulk copy command query in bytes, e.g. ``COPY``.\n"
+      + "When buffer size is reached the command is executed and a new batch is started.";
+  private static final String INSERT_BULK_COPY_BUFFER_SIZE_BYTES_MODE_DISPLAY = "Bulk Copy Command Buffer Size (Bytes)";
 
   public static final String PK_FIELDS = "pk.fields";
   private static final String PK_FIELDS_DEFAULT = "";
@@ -329,6 +364,17 @@ public class JdbcSinkConfig extends AbstractConfig {
             ConfigDef.Width.SHORT,
             BATCH_KEY_DEDUP_DISPLAY
         )
+        .define(
+            INSERT_BULK_COPY_BUFFER_SIZE_BYTES,
+            ConfigDef.Type.INT,
+            INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DEFAULT,
+            NON_NEGATIVE_INT_VALIDATOR,
+            ConfigDef.Importance.HIGH,
+            INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DOC, WRITES_GROUP,
+            5,
+            ConfigDef.Width.SHORT,
+            INSERT_BULK_COPY_BUFFER_SIZE_BYTES_MODE_DISPLAY
+        )
         // Data Mapping
         .define(
             TABLE_NAME_FORMAT,
@@ -385,6 +431,18 @@ public class JdbcSinkConfig extends AbstractConfig {
           5,
           ConfigDef.Width.MEDIUM,
           DB_TIMEZONE_CONFIG_DISPLAY
+        )
+        .define(
+          TABLE_COLUMNS_CASE_TYPE,
+          ConfigDef.Type.STRING,
+          TABLE_COLUMNS_CASE_TYPE_DEFAULT,
+          EnumValidator.in(ColumnCaseType.values()),
+          ConfigDef.Importance.LOW,
+          TABLE_COLUMNS_CASE_TYPE_DOC,
+          DATAMAPPING_GROUP,
+          1,
+          ConfigDef.Width.SHORT,
+          TABLE_COLUMNS_CASE_TYPE_DISPLAY
         )
         // DDL
         .define(
@@ -463,6 +521,9 @@ public class JdbcSinkConfig extends AbstractConfig {
   public final Set<String> fieldsWhitelist;
   public final String dialectName;
   public final TimeZone timeZone;
+  public final int bulkCopyBufferSizeBytes;
+
+  public final ColumnCaseType columnCaseType;
 
   public JdbcSinkConfig(Map<?, ?> props) {
     super(CONFIG_DEF, props);
@@ -473,6 +534,7 @@ public class JdbcSinkConfig extends AbstractConfig {
     connectionUser = getString(CONNECTION_USER);
     connectionPassword = getPasswordValue(CONNECTION_PASSWORD);
     tableNameFormat = getString(TABLE_NAME_FORMAT).trim();
+    columnCaseType = ColumnCaseType.valueOf(getString(TABLE_COLUMNS_CASE_TYPE).trim().toUpperCase());
     batchSize = getInt(BATCH_SIZE);
     batchKeyDedup = getBoolean(BATCH_KEY_DEDUP);
     deleteEnabled = getBoolean(DELETE_ENABLED);
@@ -487,6 +549,7 @@ public class JdbcSinkConfig extends AbstractConfig {
     fieldsWhitelist = new HashSet<>(getList(FIELDS_WHITELIST));
     String dbTimeZone = getString(DB_TIMEZONE_CONFIG);
     timeZone = TimeZone.getTimeZone(ZoneId.of(dbTimeZone));
+    bulkCopyBufferSizeBytes = getInt(BATCH_SIZE);
 
     if (deleteEnabled && pkMode != PrimaryKeyMode.RECORD_KEY) {
       throw new ConfigException(

@@ -15,11 +15,7 @@
 
 package io.confluent.connect.jdbc.sink;
 
-import io.confluent.connect.jdbc.util.StringUtils;
-
-import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
-import org.apache.kafka.connect.data.Field;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -28,34 +24,18 @@ import java.util.HashMap;
 import java.util.Map;
 
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
-import io.confluent.connect.jdbc.util.CachedConnectionProvider;
 import io.confluent.connect.jdbc.util.TableId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class JdbcDbWriter {
+public class JdbcDbWriter extends GenericDbWriter {
   private static final Logger log = LoggerFactory.getLogger(JdbcDbWriter.class);
 
-  private final JdbcSinkConfig config;
-  private final DatabaseDialect dbDialect;
-  private final DbStructure dbStructure;
-  final CachedConnectionProvider cachedConnectionProvider;
-
-  JdbcDbWriter(final JdbcSinkConfig config, DatabaseDialect dbDialect, DbStructure dbStructure) {
-    this.config = config;
-    this.dbDialect = dbDialect;
-    this.dbStructure = dbStructure;
-
-    this.cachedConnectionProvider = new CachedConnectionProvider(this.dbDialect) {
-      @Override
-      protected void onConnect(Connection connection) throws SQLException {
-        log.info("JdbcDbWriter Connected");
-        connection.setAutoCommit(false);
-      }
-    };
+  public JdbcDbWriter(final JdbcSinkConfig config, DatabaseDialect dbDialect, DbStructure dbStructure){
+    super(config, dbDialect, dbStructure);
   }
 
-  void write(final Collection<SinkRecord> records) throws SQLException {
+  public void write(final Collection<SinkRecord> records) throws SQLException {
     final Connection connection = cachedConnectionProvider.getConnection();
 
     final Map<TableId, BufferedRecords> bufferByTable = new HashMap<>();
@@ -76,21 +56,5 @@ public class JdbcDbWriter {
       buffer.close();
     }
     connection.commit();
-  }
-
-  void closeQuietly() {
-    cachedConnectionProvider.close();
-  }
-
-  TableId destinationTable(String topic) {
-    final String tableName = config.tableNameFormat.replace("${topic}", topic);
-    if (tableName.isEmpty()) {
-      throw new ConnectException(String.format(
-          "Destination table name for topic '%s' is empty using the format string '%s'",
-          topic,
-          config.tableNameFormat
-      ));
-    }
-    return dbDialect.parseTableIdentifier(tableName);
   }
 }

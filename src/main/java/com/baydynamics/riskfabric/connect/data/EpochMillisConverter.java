@@ -12,8 +12,9 @@ public class EpochMillisConverter {
     public static final String LOGICAL_NAME = "riskfabric.EPOCH_MILLIS";
 
     public static SchemaBuilder builder() {
-        return SchemaBuilder.string()
-                .name(LOGICAL_NAME);
+        return SchemaBuilder.int64()
+                .name(LOGICAL_NAME)
+                .version(1);
     }
 
     public static Schema schema() {
