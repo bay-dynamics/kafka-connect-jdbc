@@ -86,13 +86,15 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
         Collection<ColumnId> nonKeyFieldNames = asColumns(table, fieldsMetadata.nonKeyFieldNames);
 
         // by convention a "." in a column name in the RiskFabricDialect means the dot operator to read a composite type field
-        // wrap expression in parenthesis (=EXCLUDED.column_name).field_name
+        // we have to wrap expression in parenthesis (=EXCLUDED.column_name).field_name
         // only one level supported, i.e. no nested composite type
-        // a composite name could happen if it came in in a raw SinkRecord, either from the Kafka Topic or from a flatten SMT
-        // this is a different use case than when the Sink Connector flatten a Struct (aka Composite Type) inline in java.
-        final ExpressionBuilder.Transform<ColumnId> transform = (builder, col) -> {
+        // a composite name with a "." may happen if it came in as is in SinkRecord
+        // this is a separate use case from the Sink Connector flattening the Struct (aka Composite Type) inline in java.
+        final ExpressionBuilder.Transform<ColumnId> updateClauseTransform = (builder, col) -> {
+
             builder.append(col.name());
             builder.append("=(EXCLUDED.");
+
             boolean parenthesisClosed = false;
             for (int i=0; i<col.name().length();i++) {
                 if (col.name().charAt(i) == '.') {
@@ -132,7 +134,7 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
             builder.append(") DO UPDATE SET ");
             builder.appendList()
                     .delimitedBy(",")
-                    .transformedBy(transform)
+                    .transformedBy(updateClauseTransform)
                     .of(nonKeyFieldNames);
         }
         return builder.toString();

@@ -9,7 +9,8 @@ public class UIDConverter {
 
     public static SchemaBuilder builder() {
         return SchemaBuilder.string()
-                .name(LOGICAL_NAME);
+                .name(LOGICAL_NAME)
+                .version(1);
     }
 
     public static Schema schema() {

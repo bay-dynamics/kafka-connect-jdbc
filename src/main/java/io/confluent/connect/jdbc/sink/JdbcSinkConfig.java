@@ -184,6 +184,13 @@ public class JdbcSinkConfig extends AbstractConfig {
       + "the connector, e.g. ``COPY``.\n";
   private static final String INSERT_MODE_DISPLAY = "Insert Mode";
 
+  public static final String INSERT_BULK_COPY_BUFFER_SIZE_BYTES = "insert.bulkcopy.buffersizebytes";
+  private static final int INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DEFAULT = 10000000;
+  private static final String INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DOC =
+      "Buffer size of the bulk copy command query in bytes, e.g. ``COPY``.\n"
+      + "When buffer size is reached the command is executed and a new batch is started.";
+  private static final String INSERT_BULK_COPY_BUFFER_SIZE_BYTES_MODE_DISPLAY = "Bulk Copy Command Buffer Size (Bytes)";
+
   public static final String PK_FIELDS = "pk.fields";
   private static final String PK_FIELDS_DEFAULT = "";
   private static final String PK_FIELDS_DOC =
@@ -357,6 +364,17 @@ public class JdbcSinkConfig extends AbstractConfig {
             ConfigDef.Width.SHORT,
             BATCH_KEY_DEDUP_DISPLAY
         )
+        .define(
+            INSERT_BULK_COPY_BUFFER_SIZE_BYTES,
+            ConfigDef.Type.INT,
+            INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DEFAULT,
+            NON_NEGATIVE_INT_VALIDATOR,
+            ConfigDef.Importance.HIGH,
+            INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DOC, WRITES_GROUP,
+            5,
+            ConfigDef.Width.SHORT,
+            INSERT_BULK_COPY_BUFFER_SIZE_BYTES_MODE_DISPLAY
+        )
         // Data Mapping
         .define(
             TABLE_NAME_FORMAT,
@@ -503,6 +521,7 @@ public class JdbcSinkConfig extends AbstractConfig {
   public final Set<String> fieldsWhitelist;
   public final String dialectName;
   public final TimeZone timeZone;
+  public final int bulkCopyBufferSizeBytes;
 
   public final ColumnCaseType columnCaseType;
 
@@ -530,6 +549,7 @@ public class JdbcSinkConfig extends AbstractConfig {
     fieldsWhitelist = new HashSet<>(getList(FIELDS_WHITELIST));
     String dbTimeZone = getString(DB_TIMEZONE_CONFIG);
     timeZone = TimeZone.getTimeZone(ZoneId.of(dbTimeZone));
+    bulkCopyBufferSizeBytes = getInt(BATCH_SIZE);
 
     if (deleteEnabled && pkMode != PrimaryKeyMode.RECORD_KEY) {
       throw new ConfigException(

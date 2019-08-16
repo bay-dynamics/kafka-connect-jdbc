@@ -122,6 +122,8 @@ public class FieldsMetadata {
 
         nonKeyFieldNamesRaw.add(field.name());
 
+        //@TODO make flattening STRUCT optionl?
+
         if (field.schema().type().equals(Schema.Type.STRUCT)) {
 
           for (final Field nestedField : field.schema().fields()) {

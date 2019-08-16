@@ -1,14 +1,12 @@
 package com.baydynamics.riskfabric.connect.jdbc.sink;
 
-import java.io.Closeable;
 import java.io.StringReader;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.nio.ByteBuffer;
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
@@ -16,14 +14,15 @@ import io.confluent.connect.jdbc.sink.DbStructure;
 import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
 import io.confluent.connect.jdbc.sink.metadata.SchemaPair;
 import io.confluent.connect.jdbc.util.ColumnId;
+import io.confluent.connect.jdbc.util.DateTimeUtils;
 import io.confluent.connect.jdbc.util.ExpressionBuilder;
 import io.confluent.connect.jdbc.util.TableId;
 import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
 
-import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.data.*;
+import org.apache.kafka.connect.data.Date;
+import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
-import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.data.Field;
 
 import org.postgresql.core.BaseConnection;
 import org.postgresql.copy.CopyManager;
@@ -55,9 +54,6 @@ public class PgCopyStatement {
   private ExpressionBuilder copyCommand;
   private StringBuilder bufferBuilder = null;
   private int bufferWatermark;
-
-  private int bufferCapacity = 8000000; //@TODO put in config
-
 
   public PgCopyStatement(
           JdbcSinkConfig config,
@@ -120,26 +116,21 @@ public class PgCopyStatement {
       copyCommand.append(") FROM STDIN CSV ");
     }
 
-    // build CSV row for record
+    // build CSV row, @TODO use expressionBuilder
+    boolean firstColum = true;
     for (final String fieldName : fieldsMetadata.nonKeyFieldNames) {
-      final Field field = record.valueSchema().field(fieldName);
-      Struct valueStruct = (Struct) record.value();
-      Object fieldValue = valueStruct.get(field);
-
-      if (fieldValue == null) {
+      if (!firstColum) {
         bufferBuilder.append(COLUMN_DELIMITER);
       }
-      else {
-        bufferBuilder.append(fieldValue.toString()); //@TODO HOW format string representation + escape quotes
-        bufferBuilder.append(COLUMN_DELIMITER);
-      }
+      appendColumnValue(bufferBuilder, fieldName, record);
+      firstColum = false;
     }
     bufferBuilder.append(ROW_DELIMITER);
     bufferWatermark=bufferBuilder.length();
 
     records.add(record);
 
-    if (bufferBuilder.length() > bufferCapacity) {
+    if (records.size() >= config.batchSize || bufferBuilder.length() >= config.bulkCopyBufferSizeBytes) {
       flush();
     }
 
@@ -165,7 +156,7 @@ public class PgCopyStatement {
 
     final List<SinkRecord> flushedRecords = records;
 
-    records = new ArrayList<>();
+    this.records = new ArrayList<>();
     return flushedRecords;
   }
 
@@ -173,10 +164,68 @@ public class PgCopyStatement {
     flush();
   }
 
-  public Collection<ColumnId> asColumns(TableId tableId, Collection<String> names, JdbcSinkConfig.ColumnCaseType columnCaseType) {
+  // Helpers
+
+  private Collection<ColumnId> asColumns(TableId tableId, Collection<String> names, JdbcSinkConfig.ColumnCaseType columnCaseType) {
     return names.stream()
         .map(name -> new ColumnId(tableId, name, columnCaseType))
         .collect(Collectors.toList());
   }
 
+  private void appendColumnValue(StringBuilder builder, String fieldName, SinkRecord record) {
+    final Field field = record.valueSchema().field(fieldName);
+    final String schemaName = field.schema().name();
+    final Struct valueStruct = (Struct) record.value();
+    final Object fieldValue = valueStruct.get(field);
+    final Schema.Type type = field.schema().type();
+
+    if (fieldValue == null) {
+      return;
+    } else {
+
+      if (field.schema().name() != null) {
+        switch (schemaName) {
+          case Decimal.LOGICAL_NAME:
+            appendStringQuoted(builder, fieldValue);
+            return;
+          case Date.LOGICAL_NAME:
+            appendStringQuoted(builder, DateTimeUtils.formatDate((java.util.Date) fieldValue, config.timeZone));
+            return;
+          case Time.LOGICAL_NAME:
+            appendStringQuoted(builder, DateTimeUtils.formatTime((java.util.Date) fieldValue, config.timeZone));
+            return;
+          case org.apache.kafka.connect.data.Timestamp.LOGICAL_NAME:
+            appendStringQuoted(builder, DateTimeUtils.formatTimestamp((java.util.Date) fieldValue, config.timeZone));
+            return;
+          default:
+            // fall through to regular types
+            break;
+        }
+      }
+      switch (type) {
+        case INT8:
+        case INT16:
+        case INT32:
+        case INT64:
+        case FLOAT32:
+        case FLOAT64:
+          // no escaping required
+          appendStringQuoted(builder, fieldValue.toString());
+          break;
+        case BOOLEAN:
+          // 1 & 0 for boolean is more portable rather than TRUE/FALSE
+          appendStringQuoted(builder, (Boolean) fieldValue ? '1' : '0');
+          break;
+        case STRING:
+          appendStringQuoted(builder, fieldValue.toString().replaceAll("\"", "\"\""));
+          break;
+        default:
+          throw new ConnectException("Unsupported type for column value: " + type);
+      }
+    }
+  }
+
+  private void appendStringQuoted(StringBuilder builder, Object value) {
+    builder.append(QUOTE_CHARACTER + value.toString() + QUOTE_CHARACTER);
+  }
 }

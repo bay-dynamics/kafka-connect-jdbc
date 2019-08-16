@@ -180,46 +180,6 @@ public class PostgreSqlDatabaseDialect extends GenericDatabaseDialect {
   }
 
   @Override
-  protected String getSqlType(SinkRecordField field) {
-    if (field.schemaName() != null) {
-      switch (field.schemaName()) {
-        case Decimal.LOGICAL_NAME:
-          return "DECIMAL";
-        case Date.LOGICAL_NAME:
-          return "DATE";
-        case Time.LOGICAL_NAME:
-          return "TIME";
-        case Timestamp.LOGICAL_NAME:
-          return "TIMESTAMP";
-        default:
-          // fall through to normal types
-      }
-    }
-    switch (field.schemaType()) {
-      case INT8:
-        return "SMALLINT";
-      case INT16:
-        return "SMALLINT";
-      case INT32:
-        return "INT";
-      case INT64:
-        return "BIGINT";
-      case FLOAT32:
-        return "REAL";
-      case FLOAT64:
-        return "DOUBLE PRECISION";
-      case BOOLEAN:
-        return "BOOLEAN";
-      case STRING:
-        return "TEXT";
-      case BYTES:
-        return "BYTEA";
-      default:
-        return super.getSqlType(field);
-    }
-  }
-
-  @Override
   public int bindCompositeField(
           PreparedStatement statement,
           int startIndex,
