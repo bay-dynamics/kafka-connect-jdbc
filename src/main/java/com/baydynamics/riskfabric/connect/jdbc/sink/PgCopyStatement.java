@@ -9,14 +9,12 @@ import java.sql.SQLException;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import com.baydynamics.riskfabric.connect.data.UIDConverter;
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
 import io.confluent.connect.jdbc.sink.DbStructure;
 import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
 import io.confluent.connect.jdbc.sink.metadata.SchemaPair;
-import io.confluent.connect.jdbc.util.ColumnId;
-import io.confluent.connect.jdbc.util.DateTimeUtils;
-import io.confluent.connect.jdbc.util.ExpressionBuilder;
-import io.confluent.connect.jdbc.util.TableId;
+import io.confluent.connect.jdbc.util.*;
 import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
 
 import org.apache.kafka.connect.data.*;
@@ -168,8 +166,8 @@ public class PgCopyStatement {
 
   private Collection<ColumnId> asColumns(TableId tableId, Collection<String> names, JdbcSinkConfig.ColumnCaseType columnCaseType) {
     return names.stream()
-        .map(name -> new ColumnId(tableId, name, columnCaseType))
-        .collect(Collectors.toList());
+      .map(name -> new ColumnId(tableId, name, columnCaseType))
+      .collect(Collectors.toList());
   }
 
   private void appendColumnValue(StringBuilder builder, String fieldName, SinkRecord record) {
@@ -181,10 +179,13 @@ public class PgCopyStatement {
 
     if (fieldValue == null) {
       return;
-    } else {
-
+    }
+    else {
       if (field.schema().name() != null) {
         switch (schemaName) {
+          case UIDConverter.LOGICAL_NAME:
+            appendStringQuoted(builder, fieldValue);
+            return;
           case Decimal.LOGICAL_NAME:
             appendStringQuoted(builder, fieldValue);
             return;
@@ -219,6 +220,16 @@ public class PgCopyStatement {
         case STRING:
           appendStringQuoted(builder, fieldValue.toString().replaceAll("\"", "\"\""));
           break;
+        case BYTES:
+          final byte[] bytes;
+          if (fieldValue instanceof ByteBuffer) {
+            final ByteBuffer buffer = ((ByteBuffer) fieldValue).slice();
+            bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+          } else {
+            bytes = (byte[]) fieldValue;
+          }
+          appendStringQuoted(builder, "x'"+ BytesUtil.toHex(bytes) + "'" );
         default:
           throw new ConnectException("Unsupported type for column value: " + type);
       }

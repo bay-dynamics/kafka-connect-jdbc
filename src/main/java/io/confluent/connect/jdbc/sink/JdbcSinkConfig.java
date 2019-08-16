@@ -184,7 +184,7 @@ public class JdbcSinkConfig extends AbstractConfig {
       + "the connector, e.g. ``COPY``.\n";
   private static final String INSERT_MODE_DISPLAY = "Insert Mode";
 
-  public static final String INSERT_BULK_COPY_BUFFER_SIZE_BYTES = "insert.bulkcopy.buffersizebytes";
+  public static final String INSERT_BULK_COPY_BUFFER_SIZE_BYTES = "insert.bulkcopy.buffer.size.bytes";
   private static final int INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DEFAULT = 10000000;
   private static final String INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DOC =
       "Buffer size of the bulk copy command query in bytes, e.g. ``COPY``.\n"
