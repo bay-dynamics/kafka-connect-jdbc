@@ -134,8 +134,6 @@ public interface DatabaseDialect extends ConnectionProvider {
    */
   String name();
 
-  DbWriter getDatabaseWriter() throws UnsupportedOperationException;
-
   /**
    * Create a new prepared statement using the specified database connection.
    *
@@ -450,35 +448,36 @@ public interface DatabaseDialect extends ConnectionProvider {
    * @param index     the 1-based index of the variable first value within the prepared statement
    * @param schema    the schema for the value; may be null only if the value is null
    * @param value     the value to be bound to the variable; may be null
-   * @return          the 1-based index of the variable last value within the prepared statement. Returned index would differ from input index if the value is a composite type with many values
+   * @return          the 1-based index of the variable last value within the prepared statement.
+   *                  the index being return may differ from input index if the input value is composite bound to multiple values
    * @throws SQLException if there is a problem binding the value into the statement
    * @see #statementBinder
    */
-  void bindField(
+  int bindField(
       PreparedStatement statement,
       int index,
       Schema schema,
       Object value
   ) throws SQLException;
 
-  /**
-   * Method that binds a value with the given schema at the specified variable within a prepared
-   * statement.
-   *
-   * @param statement the prepared statement; may not be null
-   * @param startIndex     the 1-based index of the composite variable first value within the prepared statement
-   * @param schema    the schema for the value; may be null only if the value is null
-   * @param value     the value to be bound to the variable; may be null
-   * @return          the 1-based index of the composite variable last value within the prepared statement.
-   * @throws SQLException if there is a problem binding the value into the statement
-   * @see #statementBinder
-   */
-  int bindCompositeField(
-      PreparedStatement statement,
-      int startIndex,
-      Schema schema,
-      Struct value
-  ) throws SQLException;
+//  /**
+//   * Method that binds a value with the given schema at the specified variable within a prepared
+//   * statement.
+//   *
+//   * @param statement the prepared statement; may not be null
+//   * @param startIndex     the 1-based index of the composite variable first value within the prepared statement
+//   * @param schema    the schema for the value; may be null only if the value is null
+//   * @param value     the value to be bound to the variable; may be null
+//   * @return          the 1-based index of the composite variable last value within the prepared statement.
+//   * @throws SQLException if there is a problem binding the value into the statement
+//   * @see #statementBinder
+//   */
+//  int bindCompositeField(
+//      PreparedStatement statement,
+//      int startIndex,
+//      Schema schema,
+//      Struct value
+//  ) throws SQLException;
 
   /**
    * A function to bind the values from a sink record into a prepared statement.

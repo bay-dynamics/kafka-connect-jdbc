@@ -13,8 +13,14 @@
  * specific language governing permissions and limitations under the License.
  */
 
-package io.confluent.connect.jdbc.sink;
+package com.baydynamics.riskfabric.connect.jdbc.sink;
 
+import io.confluent.connect.jdbc.dialect.DatabaseDialect;
+import io.confluent.connect.jdbc.dialect.DatabaseDialects;
+import io.confluent.connect.jdbc.sink.DbStructure;
+import io.confluent.connect.jdbc.sink.DbWriter;
+import io.confluent.connect.jdbc.sink.JdbcDbWriter;
+import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.ConnectException;
@@ -28,34 +34,32 @@ import java.sql.SQLException;
 import java.util.Collection;
 import java.util.Map;
 
-import io.confluent.connect.jdbc.dialect.DatabaseDialect;
-import io.confluent.connect.jdbc.dialect.DatabaseDialects;
-
-public class JdbcSinkTask extends SinkTask {
-  private static final Logger log = LoggerFactory.getLogger(JdbcSinkTask.class);
+public class RiskFabricJdbcSinkTask extends SinkTask {
+  private static final Logger log = LoggerFactory.getLogger(RiskFabricJdbcSinkTask.class);
 
   DatabaseDialect dialect;
-  JdbcSinkConfig config;
+  RiskFabricJdbcSinkConfig config;
   DbWriter writer;
   int remainingRetries;
 
   @Override
   public void start(final Map<String, String> props) {
     log.info("Starting JDBC Sink task");
-    config = new JdbcSinkConfig(props);
+    config = new RiskFabricJdbcSinkConfig(props);
     initWriter();
     remainingRetries = config.maxRetries;
   }
 
   void initWriter() {
-    if (config.dialectName != null && !config.dialectName.trim().isEmpty()) {
-      dialect = DatabaseDialects.create(config.dialectName, config);
-    } else {
-      dialect = DatabaseDialects.findBestFor(config.connectionUrl, config);
-    }
+    dialect = DatabaseDialects.create("RiskFabricDatabaseDialect", config);
+    log.info("Initializing writer for insert.mode {} using SQL dialect: {}", config.insertMode, dialect.getClass().getSimpleName());
     final DbStructure dbStructure = new DbStructure(dialect);
-    log.info("Initializing writer using SQL dialect: {}", dialect.getClass().getSimpleName());
-    writer = new JdbcDbWriter(config, dialect, dbStructure);
+    if (config.insertMode.equals(JdbcSinkConfig.InsertMode.BULKCOPY)) {
+      writer = new JdbcBulkWriter(config, dialect, dbStructure);
+    }
+    else {
+      writer = new JdbcDbWriter(config, dialect, dbStructure);
+    }
   }
 
   @Override

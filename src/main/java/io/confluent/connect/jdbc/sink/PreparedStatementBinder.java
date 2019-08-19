@@ -100,20 +100,25 @@ public class PreparedStatementBinder implements StatementBinder {
 
       case KAFKA: {
         assert fieldsMetadata.keyFieldNames.size() == 3;
-        bindField(index++, Schema.STRING_SCHEMA, record.topic());
-        bindField(index++, Schema.INT32_SCHEMA, record.kafkaPartition());
-        bindField(index++, Schema.INT64_SCHEMA, record.kafkaOffset());
+        index = bindField(index, Schema.STRING_SCHEMA, record.topic());
+        index++;
+        index = bindField(index, Schema.INT32_SCHEMA, record.kafkaPartition());
+        index++;
+        index = bindField(index, Schema.INT64_SCHEMA, record.kafkaOffset());
+        index++;
       }
       break;
 
       case RECORD_KEY: {
         if (schemaPair.keySchema.type().isPrimitive()) {
           assert fieldsMetadata.keyFieldNames.size() == 1;
-          bindField(index++, schemaPair.keySchema, record.key());
+          index = bindField(index, schemaPair.keySchema, record.key());
+          index++;
         } else {
           for (String fieldName : fieldsMetadata.keyFieldNames) {
             final Field field = schemaPair.keySchema.field(fieldName);
-            bindField(index++, field.schema(), ((Struct) record.key()).get(field));
+            index = bindField(index, field.schema(), ((Struct) record.key()).get(field));
+            index++;
           }
         }
       }
@@ -122,7 +127,8 @@ public class PreparedStatementBinder implements StatementBinder {
       case RECORD_VALUE: {
         for (String fieldName : fieldsMetadata.keyFieldNames) {
           final Field field = schemaPair.valueSchema.field(fieldName);
-          bindField(index++, field.schema(), ((Struct) record.value()).get(field));
+          index = bindField(index, field.schema(), ((Struct) record.value()).get(field));
+          index++;
         }
       }
       break;
@@ -134,28 +140,41 @@ public class PreparedStatementBinder implements StatementBinder {
   }
 
   protected int bindNonKeyFields(
-      SinkRecord record,
-      Struct valueStruct,
-      int index
+          SinkRecord record,
+          Struct valueStruct,
+          int index
   ) throws SQLException {
-    for (final String fieldName : fieldsMetadata.nonKeyFieldNamesRaw) {
+    for (final String fieldName : fieldsMetadata.nonKeyFieldNames) {
       final Field field = record.valueSchema().field(fieldName);
-      if (field.schema().type().equals(Schema.Type.STRUCT)) {
-        Struct nestedValueStruct = (Struct) valueStruct.get(field);
-        index = bindCompositeField(index++, field.schema(), nestedValueStruct);
-      }
-      else {
-        bindField(index++, field.schema(), valueStruct.get(field));
-      }
+      index = bindField(index, field.schema(), valueStruct.get(field));
+      index++;
     }
     return index;
   }
 
-  protected int bindCompositeField(int index, Schema schema, Struct value) throws SQLException {
-    return dialect.bindCompositeField(statement, index, schema, value);
-  }
+//  protected int bindNonKeyFields(
+//      SinkRecord record,
+//      Struct valueStruct,
+//      int index
+//  ) throws SQLException {
+//    for (final String fieldName : fieldsMetadata.nonKeyFieldNamesRaw) {
+//      final Field field = record.valueSchema().field(fieldName);
+//      if (field.schema().type().equals(Schema.Type.STRUCT)) {
+//        Struct nestedValueStruct = (Struct) valueStruct.get(field);
+//        index = bindCompositeField(index++, field.schema(), nestedValueStruct);
+//      }
+//      else {
+//        bindField(index++, field.schema(), valueStruct.get(field));
+//      }
+//    }
+//    return index;
+//  }
 
-  protected void bindField(int index, Schema schema, Object value) throws SQLException {
-    dialect.bindField(statement, index, schema, value);
+//  protected int bindCompositeField(int index, Schema schema, Struct value) throws SQLException {
+//    return dialect.bindCompositeField(statement, index, schema, value);
+//  }
+
+  protected int bindField(int index, Schema schema, Object value) throws SQLException {
+    return dialect.bindField(statement, index, schema, value);
   }
 }
