@@ -19,12 +19,7 @@ import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.errors.ConnectException;
 
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
 
@@ -32,13 +27,14 @@ public class FieldsMetadata {
 
   public final Set<String> keyFieldNames;
   public final Set<String> nonKeyFieldNames;
-  public final Set<String> nonKeyFieldNamesRaw;
+  //public final Set<String> nonKeyFieldNamesRaw;
+
   public final Map<String, SinkRecordField> allFields;
 
   private FieldsMetadata(
           Set<String> keyFieldNames,
           Set<String> nonKeyFieldNames,
-          Set<String> nonKeyFieldNamesRaw,
+          //Set<String> nonKeyFieldNamesRaw,
           Map<String, SinkRecordField> allFields
   ) {
     boolean fieldCountsMatch = (keyFieldNames.size() + nonKeyFieldNames.size() == allFields.size());
@@ -52,7 +48,7 @@ public class FieldsMetadata {
     }
     this.keyFieldNames = keyFieldNames;
     this.nonKeyFieldNames = nonKeyFieldNames;
-    this.nonKeyFieldNamesRaw = nonKeyFieldNamesRaw;
+    //this.nonKeyFieldNamesRaw = nonKeyFieldNamesRaw;
     this.allFields = allFields;
   }
 
@@ -109,7 +105,7 @@ public class FieldsMetadata {
     }
 
     final Set<String> nonKeyFieldNames = new LinkedHashSet<>();
-    final Set<String> nonKeyFieldNamesRaw = new LinkedHashSet<>();
+    //final Set<String> nonKeyFieldNamesRaw = new LinkedHashSet<>();
 
     if (valueSchema != null) {
       for (Field field : valueSchema.fields()) {
@@ -120,24 +116,22 @@ public class FieldsMetadata {
           continue;
         }
 
-        nonKeyFieldNamesRaw.add(field.name());
+        //nonKeyFieldNamesRaw.add(field.name());
 
-        //@TODO make flattening STRUCT optionl?
-
-        if (field.schema().type().equals(Schema.Type.STRUCT)) {
-
-          for (final Field nestedField : field.schema().fields()) {
-            String nestedFieldName = field.name() + "." + nestedField.name();
-            nonKeyFieldNames.add(nestedFieldName);
-            final Schema nestedFieldSchema = nestedField.schema();
-            allFields.put(nestedFieldName, new SinkRecordField(nestedFieldSchema, nestedFieldName, false));
-          }
-        }
-        else {
+//        if (field.schema().type().equals(Schema.Type.STRUCT)) {
+//
+//          for (final Field nestedField : field.schema().fields()) {
+//            String nestedFieldName = field.name() + "." + nestedField.name();
+//            nonKeyFieldNames.add(nestedFieldName);
+//            final Schema nestedFieldSchema = nestedField.schema();
+//            allFields.put(nestedFieldName, new SinkRecordField(nestedFieldSchema, nestedFieldName, false));
+//          }
+//        }
+//        else {
           nonKeyFieldNames.add(field.name());
           final Schema fieldSchema = field.schema();
           allFields.put(field.name(), new SinkRecordField(fieldSchema, field.name(), false));
-        }
+//        }
       }
     }
 
@@ -147,7 +141,8 @@ public class FieldsMetadata {
       );
     }
 
-    return new FieldsMetadata(keyFieldNames, nonKeyFieldNames, nonKeyFieldNamesRaw, allFields);
+    //return new FieldsMetadata(keyFieldNames, nonKeyFieldNames, nonKeyFieldNamesRaw, allFields);
+    return new FieldsMetadata(keyFieldNames, nonKeyFieldNames, allFields);
   }
 
   private static void extractKafkaPk(
@@ -279,6 +274,36 @@ public class FieldsMetadata {
       final Schema fieldSchema = valueSchema.field(fieldName).schema();
       allFields.put(fieldName, new SinkRecordField(fieldSchema, fieldName, true));
     }
+  }
+
+ public Collection<SinkRecordField> getKeyFieldsInInsertOrder() {
+   ArrayList<SinkRecordField> fieldsOrdered = new ArrayList<SinkRecordField>();
+   for (String keyFieldName : this.keyFieldNames) {
+     fieldsOrdered.add(allFields.get(keyFieldName));
+   }
+
+   return fieldsOrdered;
+ }
+
+  public Collection<SinkRecordField> getNonKeyFieldsInInsertOrder() {
+    ArrayList<SinkRecordField> fieldsOrdered = new ArrayList<SinkRecordField>();
+    for (String nonKeyFieldName : this.nonKeyFieldNames) {
+      fieldsOrdered.add(allFields.get(nonKeyFieldName));
+    }
+
+    return fieldsOrdered;
+  }
+
+  public Collection<SinkRecordField> getAllFieldsInInsertOrder() {
+    ArrayList<SinkRecordField> fieldsOrdered = new ArrayList<SinkRecordField>();
+    for (String keyFieldName : this.keyFieldNames) {
+      fieldsOrdered.add(allFields.get(keyFieldName));
+    }
+
+    for (String nonKeyFieldName : this.nonKeyFieldNames) {
+      fieldsOrdered.add(allFields.get(nonKeyFieldName));
+    }
+    return fieldsOrdered;
   }
 
   @Override

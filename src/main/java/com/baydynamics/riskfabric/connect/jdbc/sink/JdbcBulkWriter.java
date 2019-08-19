@@ -23,11 +23,11 @@ public class JdbcBulkWriter extends GenericDbWriter {
     public void write(final Collection<SinkRecord> records) throws SQLException {
         final Connection connection = cachedConnectionProvider.getConnection();
 
-        PgCopyStatement copyStatement = null;
+        PgCopy copyStatement = null;
         for (SinkRecord record : records) {
             if (copyStatement == null) {
                 final TableId tableId = destinationTable(record.topic());
-                copyStatement = new PgCopyStatement(config, tableId, dbDialect, dbStructure, connection);
+                copyStatement = new PgCopy(config, tableId, dbDialect, dbStructure, connection);
             }
             copyStatement.add(record);
         }

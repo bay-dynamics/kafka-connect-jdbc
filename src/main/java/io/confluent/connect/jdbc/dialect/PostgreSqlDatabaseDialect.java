@@ -179,20 +179,20 @@ public class PostgreSqlDatabaseDialect extends GenericDatabaseDialect {
     return JSON_TYPE_NAME.equalsIgnoreCase(typeName) || JSONB_TYPE_NAME.equalsIgnoreCase(typeName);
   }
 
-  @Override
-  public int bindCompositeField(
-          PreparedStatement statement,
-          int startIndex,
-          Schema schema,
-          Struct value
-  ) throws SQLException {
-    int lastIndex = startIndex;
-    // not recursive!
-    for (final Field nestedField : schema.fields()) {
-      bindField(statement, lastIndex++, nestedField.schema(), value.get(nestedField));
-    }
-    return lastIndex;
-  }
+//  @Override
+//  public int bindCompositeField(
+//          PreparedStatement statement,
+//          int startIndex,
+//          Schema schema,
+//          Struct value
+//  ) throws SQLException {
+//    int lastIndex = startIndex;
+//    // not recursive!
+//    for (final Field nestedField : schema.fields()) {
+//      bindField(statement, lastIndex++, nestedField.schema(), value.get(nestedField));
+//    }
+//    return lastIndex;
+//  }
 
   @Override
   public String buildUpsertQueryStatement(

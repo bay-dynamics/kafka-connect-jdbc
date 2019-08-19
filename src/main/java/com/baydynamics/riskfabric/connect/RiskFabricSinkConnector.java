@@ -12,9 +12,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import io.confluent.connect.jdbc.sink.JdbcSinkTask;
 import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
 import io.confluent.connect.jdbc.util.Version;
+
+import com.baydynamics.riskfabric.connect.jdbc.sink.RiskFabricJdbcSinkTask;
 
 public class RiskFabricSinkConnector extends SinkConnector {
     private static final Logger log = LoggerFactory.getLogger(RiskFabricSinkConnector.class);
@@ -22,7 +23,7 @@ public class RiskFabricSinkConnector extends SinkConnector {
     private Map<String, String> configProps;
 
     public Class<? extends Task> taskClass() {
-        return JdbcSinkTask.class;
+        return RiskFabricJdbcSinkTask.class;
     }
 
     @Override

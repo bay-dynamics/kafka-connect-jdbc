@@ -79,12 +79,6 @@ public class JdbcSinkConfig extends AbstractConfig {
     RECORD_VALUE;
   }
 
-  public enum ColumnCaseType {
-    DEFAULT,
-    SNAKE_CASE
-  }
-
-
   public static final List<String> DEFAULT_KAFKA_PK_NAMES = Collections.unmodifiableList(
       Arrays.asList(
           "__connect_topic",
@@ -115,11 +109,6 @@ public class JdbcSinkConfig extends AbstractConfig {
       + "'kafka_orders'.";
   private static final String TABLE_NAME_FORMAT_DISPLAY = "Table Name Format";
 
-  public static final String TABLE_COLUMNS_CASE_TYPE = "table.columns.case.type";
-  public static final String TABLE_COLUMNS_CASE_TYPE_DEFAULT = "DEFAULT";
-  private static final String TABLE_COLUMNS_CASE_TYPE_DOC = "A case type for writing the schema names with the destination column names case type.";
-  private static final String TABLE_COLUMNS_CASE_TYPE_DISPLAY = "Case Type";
-
   public static final String MAX_RETRIES = "max.retries";
   private static final int MAX_RETRIES_DEFAULT = 10;
   private static final String MAX_RETRIES_DOC =
@@ -144,7 +133,9 @@ public class JdbcSinkConfig extends AbstractConfig {
   private static final String BATCH_KEY_DEDUP_DOC =
       "Specify if records should be deduplicated within a kafka poll batch, only retaining for insertion"
       + " the latest occurrence of a record by key.";
-  private static final String BATCH_KEY_DEDUP_DISPLAY = "Deduplicate Records with the same Kafka Key within a batch. Retain the latest in order.";
+  private static final String BATCH_KEY_DEDUP_DISPLAY =
+      "Deduplicate Records with the same Kafka Key within a batch. "
+      + "Retain the latest in order.";
 
   public static final String DELETE_ENABLED = "delete.enabled";
   private static final String DELETE_ENABLED_DEFAULT = "false";
@@ -359,9 +350,9 @@ public class JdbcSinkConfig extends AbstractConfig {
             ConfigDef.Type.BOOLEAN,
             BATCH_KEY_DEDUP_DEFAULT,
             ConfigDef.Importance.HIGH,
-            BATCH_SIZE_DOC, WRITES_GROUP,
+            BATCH_KEY_DEDUP_DOC, WRITES_GROUP,
             4,
-            ConfigDef.Width.SHORT,
+            ConfigDef.Width.MEDIUM,
             BATCH_KEY_DEDUP_DISPLAY
         )
         .define(
@@ -421,28 +412,16 @@ public class JdbcSinkConfig extends AbstractConfig {
             ConfigDef.Width.LONG,
             FIELDS_WHITELIST_DISPLAY
         ).define(
-          DB_TIMEZONE_CONFIG,
-          ConfigDef.Type.STRING,
-          DB_TIMEZONE_DEFAULT,
-          TimeZoneValidator.INSTANCE,
-          ConfigDef.Importance.MEDIUM,
-          DB_TIMEZONE_CONFIG_DOC,
-          DATAMAPPING_GROUP,
-          5,
-          ConfigDef.Width.MEDIUM,
-          DB_TIMEZONE_CONFIG_DISPLAY
-        )
-        .define(
-          TABLE_COLUMNS_CASE_TYPE,
-          ConfigDef.Type.STRING,
-          TABLE_COLUMNS_CASE_TYPE_DEFAULT,
-          EnumValidator.in(ColumnCaseType.values()),
-          ConfigDef.Importance.LOW,
-          TABLE_COLUMNS_CASE_TYPE_DOC,
-          DATAMAPPING_GROUP,
-          1,
-          ConfigDef.Width.SHORT,
-          TABLE_COLUMNS_CASE_TYPE_DISPLAY
+            DB_TIMEZONE_CONFIG,
+            ConfigDef.Type.STRING,
+            DB_TIMEZONE_DEFAULT,
+            TimeZoneValidator.INSTANCE,
+            ConfigDef.Importance.MEDIUM,
+            DB_TIMEZONE_CONFIG_DOC,
+            DATAMAPPING_GROUP,
+            5,
+            ConfigDef.Width.MEDIUM,
+            DB_TIMEZONE_CONFIG_DISPLAY
         )
         // DDL
         .define(
@@ -523,8 +502,6 @@ public class JdbcSinkConfig extends AbstractConfig {
   public final TimeZone timeZone;
   public final int bulkCopyBufferSizeBytes;
 
-  public final ColumnCaseType columnCaseType;
-
   public JdbcSinkConfig(Map<?, ?> props) {
     super(CONFIG_DEF, props);
 
@@ -534,7 +511,6 @@ public class JdbcSinkConfig extends AbstractConfig {
     connectionUser = getString(CONNECTION_USER);
     connectionPassword = getPasswordValue(CONNECTION_PASSWORD);
     tableNameFormat = getString(TABLE_NAME_FORMAT).trim();
-    columnCaseType = ColumnCaseType.valueOf(getString(TABLE_COLUMNS_CASE_TYPE).trim().toUpperCase());
     batchSize = getInt(BATCH_SIZE);
     batchKeyDedup = getBoolean(BATCH_KEY_DEDUP);
     deleteEnabled = getBoolean(DELETE_ENABLED);
@@ -549,7 +525,7 @@ public class JdbcSinkConfig extends AbstractConfig {
     fieldsWhitelist = new HashSet<>(getList(FIELDS_WHITELIST));
     String dbTimeZone = getString(DB_TIMEZONE_CONFIG);
     timeZone = TimeZone.getTimeZone(ZoneId.of(dbTimeZone));
-    bulkCopyBufferSizeBytes = getInt(BATCH_SIZE);
+    bulkCopyBufferSizeBytes = getInt(INSERT_BULK_COPY_BUFFER_SIZE_BYTES);
 
     if (deleteEnabled && pkMode != PrimaryKeyMode.RECORD_KEY) {
       throw new ConfigException(
@@ -565,7 +541,7 @@ public class JdbcSinkConfig extends AbstractConfig {
     return null;
   }
 
-  private static class EnumValidator implements ConfigDef.Validator {
+  protected static class EnumValidator implements ConfigDef.Validator {
     private final List<String> canonicalValues;
     private final Set<String> validValues;
 
