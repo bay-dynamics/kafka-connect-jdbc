@@ -2,34 +2,32 @@ package com.baydynamics.riskfabric.connect.jdbc.dialect;
 
 import com.baydynamics.riskfabric.connect.data.EpochMillisConverter;
 import com.baydynamics.riskfabric.connect.data.UIDConverter;
-import com.baydynamics.riskfabric.connect.jdbc.sink.JdbcBulkWriter;
 import com.baydynamics.riskfabric.connect.jdbc.sink.RiskFabricJdbcSinkConfig;
-import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
+
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
 import io.confluent.connect.jdbc.dialect.DatabaseDialectProvider;
 import io.confluent.connect.jdbc.dialect.PostgreSqlDatabaseDialect;
-import io.confluent.connect.jdbc.sink.DbStructure;
-import io.confluent.connect.jdbc.sink.DbWriter;
 import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
 import io.confluent.connect.jdbc.sink.metadata.SinkRecordField;
 import io.confluent.connect.jdbc.util.*;
+
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.connect.errors.ConnectException;
 
+import javax.ws.rs.NotSupportedException;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.Collection;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
 
-    protected final JdbcSinkConfig.ColumnCaseType columnCaseType;
-    protected final JdbcSinkConfig.CompositeValueBindingMode compositeValueBindingMode;
+    protected RiskFabricJdbcSinkConfig.ColumnCaseType columnCaseType = null;
+    protected RiskFabricJdbcSinkConfig.CompositeValueBindingMode compositeValueBindingMode = null;
 
     public static class Provider extends DatabaseDialectProvider.SubprotocolBasedProvider {
         public Provider() {
@@ -46,12 +44,14 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
         super(config);
 
         if (config instanceof RiskFabricJdbcSinkConfig) {
-            columnCaseType = ((RiskFabricJdbcSinkConfig) config).columnCaseType;
-            compositeValueBindingMode = ((RiskFabricJdbcSinkConfig) config).compositeValueBindingMode;
-        } else {
+            RiskFabricJdbcSinkConfig rfConfig = (RiskFabricJdbcSinkConfig) config;
+            columnCaseType = rfConfig.columnCaseType;
+            compositeValueBindingMode = rfConfig.compositeValueBindingMode;
+        }
+        else {
             // not applicable
-            columnCaseType = JdbcSinkConfig.ColumnCaseType.valueOf(config.getString(RiskFabricJdbcSinkConfig.DIALECT_RISKFABRIC_TABLE_COLUMNS_CASE_TYPE_DEFAULT).trim().toUpperCase());
-            compositeValueBindingMode = JdbcSinkConfig.CompositeValueBindingMode.valueOf(config.getString(RiskFabricJdbcSinkConfig.DIALECT_RISKFABRIC_COMPOSITE_VALUE_BINDING_MODE).trim().toUpperCase());
+            columnCaseType = RiskFabricJdbcSinkConfig.ColumnCaseType.valueOf(config.getString(RiskFabricJdbcSinkConfig.DIALECT_RISKFABRIC_TABLE_COLUMNS_CASE_TYPE_DEFAULT).trim().toUpperCase());
+            compositeValueBindingMode = RiskFabricJdbcSinkConfig.CompositeValueBindingMode.valueOf(config.getString(RiskFabricJdbcSinkConfig.DIALECT_RISKFABRIC_COMPOSITE_VALUE_BINDING_MODE).trim().toUpperCase());
         }
     }
 
@@ -66,12 +66,13 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
             statement.setObject(index, null);
         }
         else {
-          if (schema.type().equals(Schema.Type.STRUCT) &&
-            this.compositeValueBindingMode.equals(JdbcSinkConfig.CompositeValueBindingMode.INDIVIDUAL_COLUMN)) {
+          if (schema.type().equals(Schema.Type.STRUCT)) {
+            //Flatten the values for both PROPERTY_AS_COLUMN and ROW_EXPRESSION
             Struct compositeValue = (Struct) value;
             for (final Field nestedField : schema.fields()) {
                 bindNonCompositeField(statement, index++, nestedField.schema(), compositeValue.get(nestedField));
             }
+            index--; // 1 too far
           }
           else {
               bindNonCompositeField(statement, index, schema, value);
@@ -99,8 +100,8 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
             TableId table,
             FieldsMetadata fieldsMetadata
     ) {
-        Collection<ColumnId> keyColumns = asColumnsUsingConfig(table, fieldsMetadata.getKeyFieldsInInsertOrder());
-        Collection<ColumnId> nonKeyColumns = asColumnsUsingConfig(table, fieldsMetadata.getNonKeyFieldsInInsertOrder());
+        Collection<SinkRecordField> keyFields = fieldsMetadata.getKeyFieldsInInsertOrder();
+        Collection<SinkRecordField> nonKeyFields = fieldsMetadata.getNonKeyFieldsInInsertOrder();
 
         ExpressionBuilder builder = expressionBuilder();
         builder.append("INSERT INTO ");
@@ -108,11 +109,39 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
         builder.append("(");
         builder.appendList()
                 .delimitedBy(",")
-                .transformedBy((ExpressionBuilder.columnNames()))
-                .of(keyColumns, nonKeyColumns);
+                .transformedBy(upsertColumnNameTransform)
+                .of(keyFields, nonKeyFields);
         builder.append(") VALUES(");
-        builder.appendMultiple(",", "?", keyColumns.size() + nonKeyColumns.size());
+        builder.appendList()
+                .delimitedBy(",")
+                .transformedBy(insertValuePlaceHolderTransform)
+                .of(keyFields, nonKeyFields);
         builder.append(")");
+        return builder.toString();
+    }
+
+    public String buildUpdateStatement(
+            TableId table,
+            FieldsMetadata fieldsMetadata
+    ) {
+        Collection<SinkRecordField> keyFields = fieldsMetadata.getKeyFieldsInInsertOrder();
+        Collection<SinkRecordField> nonKeyFields = fieldsMetadata.getNonKeyFieldsInInsertOrder();
+
+        ExpressionBuilder builder = expressionBuilder();
+        builder.append("UPDATE ");
+        builder.append(table);
+        builder.append(" SET ");
+        builder.appendList()
+            .delimitedBy(",")
+            .transformedBy(updateValueTransform)
+            .of(nonKeyFields);
+        if (!keyFields.isEmpty()) {
+            builder.append(" WHERE ");
+            builder.appendList()
+                .delimitedBy(" AND ")
+                .transformedBy(updateKeyTransform)
+                .of(keyFields);
+        }
         return builder.toString();
     }
 
@@ -121,8 +150,8 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
         TableId table,
         FieldsMetadata fieldsMetadata
     ) {
-        Collection<ColumnId> keyColumns = asColumnsUsingConfig(table, fieldsMetadata.getKeyFieldsInInsertOrder());
-        Collection<ColumnId> nonKeyColumns = asColumnsUsingConfig(table, fieldsMetadata.getNonKeyFieldsInInsertOrder());
+        Collection<SinkRecordField> keyFields = fieldsMetadata.getKeyFieldsInInsertOrder();
+        Collection<SinkRecordField> nonKeyFields = fieldsMetadata.getNonKeyFieldsInInsertOrder();
 
         ExpressionBuilder builder = expressionBuilder();
         builder.append("INSERT INTO ");
@@ -130,23 +159,26 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
         builder.append(" (");
         builder.appendList()
                 .delimitedBy(",")
-                .transformedBy((ExpressionBuilder.columnNames()))
-                .of(keyColumns, nonKeyColumns);
+                .transformedBy(upsertColumnNameTransform)
+                .of(keyFields, nonKeyFields);
         builder.append(") VALUES (");
-        builder.appendMultiple(",", "?", keyColumns.size() + nonKeyColumns.size());
+        builder.appendList()
+                .delimitedBy(",")
+                .transformedBy(insertValuePlaceHolderTransform)
+                .of(keyFields, nonKeyFields);
         builder.append(") ON CONFLICT (");
         builder.appendList()
                 .delimitedBy(",")
-                .transformedBy(ExpressionBuilder.columnNames())
-                .of(keyColumns);
-        if (nonKeyColumns.isEmpty()) {
+                .transformedBy(upsertColumnNameTransform)
+                .of(keyFields);
+        if (keyFields.isEmpty()) {
             builder.append(") DO NOTHING");
         } else {
             builder.append(") DO UPDATE SET ");
             builder.appendList()
                 .delimitedBy(",")
-                .transformedBy(updateClauseTransform)
-                .of(nonKeyColumns);
+                .transformedBy(excludeColumnNameTransform)
+                .of(nonKeyFields);
         }
         return builder.toString();
     }
@@ -185,53 +217,174 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
         return false;
     }
 
-    private static ExpressionBuilder.Transform<ColumnId> updateClauseTransform = (builder, col) -> {
-
-        builder.append(col.name());
-        builder.append("=(EXCLUDED.");
-
-        boolean parenthesisClosed = false;
-        for (int i=0; i<col.name().length();i++) {
-            if (col.name().charAt(i) == '.') {
-                builder.append(')');
-                builder.append(col.name().charAt(i));
-                builder.append(col.name().subSequence(i+1, col.name().length()));
-                parenthesisClosed = true;
-                break;
+    private ExpressionBuilder.Transform<SinkRecordField> upsertColumnNameTransform = (builder, field) -> {
+        if (field.schemaType().equals(Schema.Type.STRUCT)) {
+            if (compositeValueBindingMode.equals(RiskFabricJdbcSinkConfig.CompositeValueBindingMode.PROPERTY_AS_COLUMN)) {
+                builder
+                    .appendList()
+                        .delimitedBy(",")
+                        .of(field.schemaFields().stream().map(nestedField ->
+                            columnCaseType.equals(RiskFabricJdbcSinkConfig.ColumnCaseType.SNAKE_CASE) ?
+                                    StringUtils.toSnakeCase(field.name() + "." + nestedField.name())
+                                : field.name() + "." + nestedField.name()
+                        ).collect(Collectors.toList()));
+            }
+            else if (compositeValueBindingMode.equals(RiskFabricJdbcSinkConfig.CompositeValueBindingMode.ROW_EXPRESSION)) {
+                builder
+                    .append(columnCaseType.equals(RiskFabricJdbcSinkConfig.ColumnCaseType.SNAKE_CASE) ?
+                        StringUtils.toSnakeCase(field.name())
+                        : field.name());
             }
             else {
-                builder.append(col.name().charAt(i));
+                throw new NotSupportedException(compositeValueBindingMode.toString());
             }
         }
-        if (!parenthesisClosed) {
-            builder.append(')');
+        else {
+            builder
+                .append(columnCaseType.equals(RiskFabricJdbcSinkConfig.ColumnCaseType.SNAKE_CASE) ?
+                    StringUtils.toSnakeCase(field.name())
+                    : field.name()
+            );
         }
     };
 
+    private ExpressionBuilder.Transform<SinkRecordField> insertValuePlaceHolderTransform = (builder, field) -> {
+        if (field.schemaType().equals(Schema.Type.STRUCT)) {
+            if (compositeValueBindingMode.equals(RiskFabricJdbcSinkConfig.CompositeValueBindingMode.PROPERTY_AS_COLUMN)) {
+                builder
+                    .appendMultiple(",", "?", field.schemaFields().size());
+            }
+            else if (compositeValueBindingMode.equals(RiskFabricJdbcSinkConfig.CompositeValueBindingMode.ROW_EXPRESSION)) {
+                builder
+                    .append("ROW(")
+                    .appendMultiple(",", "?", field.schemaFields().size())
+                    .append(")");
+            }
+            else {
+                throw new NotSupportedException(compositeValueBindingMode.toString());
+            }
+        }
+        else {
+            builder
+                .append("?");
+        }
+    };
 
-    // by convention a "." is interpreted as the dot operator to access a composite value property
-    // postgres syntax requires to wrap the expression in parenthesis (=EXCLUDED.column_name).field_name
-    // only one level supported here, i.e. no nested composite type
-    // a dot may occur in a field name if there is a SMT::flatten configured in the connector
-    // otherwise dots are not legal within Avro fields names
-    public Collection<ColumnId> asColumnsUsingConfig(TableId tableId, Collection<SinkRecordField> fields) {
-        return fields.stream()
-            .flatMap(field -> {
-                if (field.schemaType().equals(Schema.Type.STRUCT)
-                        && compositeValueBindingMode.equals(JdbcSinkConfig.CompositeValueBindingMode.INDIVIDUAL_COLUMN)) {
+    private ExpressionBuilder.Transform<SinkRecordField> updateValueTransform = (builder, field) -> this.updateTransform(builder, field, ",");
+    private ExpressionBuilder.Transform<SinkRecordField> updateKeyTransform = (builder, field) -> this.updateTransform(builder, field, " AND ");
 
-                    return field.schemaFields().stream().map(nestedField ->
-                            columnCaseType.equals(JdbcSinkConfig.ColumnCaseType.SNAKE_CASE) ?
-                                    new ColumnId(tableId, StringUtils.toSnakeCase(field.name() + "." + nestedField.name()))
-                                    : new ColumnId(tableId, nestedField.name()));
+    private void updateTransform(ExpressionBuilder builder, SinkRecordField field, String delim) {
+        if (field.schemaType().equals(Schema.Type.STRUCT)) {
+            if (compositeValueBindingMode.equals(RiskFabricJdbcSinkConfig.CompositeValueBindingMode.PROPERTY_AS_COLUMN)) {
+                builder
+                    .appendList()
+                    .delimitedBy(delim)
+                    .of(field.schemaFields().stream().map(nestedField -> {
+                        String fieldName = field.name();
+                        String nestedFieldName = nestedField.name();
+                        if (columnCaseType.equals(RiskFabricJdbcSinkConfig.ColumnCaseType.SNAKE_CASE)) {
+                            fieldName = StringUtils.toSnakeCase(fieldName);
+                            nestedFieldName = StringUtils.toSnakeCase(nestedFieldName);
+                        }
 
-                } else {
-                    return Stream.of(columnCaseType.equals(JdbcSinkConfig.ColumnCaseType.SNAKE_CASE) ?
-                            new ColumnId(tableId, StringUtils.toSnakeCase((field.name())))
-                            : new ColumnId(tableId, field.name()));
+                        StringBuilder nestedBuilder = new StringBuilder();
+                        nestedBuilder.append(fieldName);
+                        nestedBuilder.append(".");
+                        nestedBuilder.append(nestedFieldName);
+                        nestedBuilder.append("=?");
 
+                        return nestedBuilder.toString();
+                    }).collect(Collectors.toList()));
+            } else if (compositeValueBindingMode.equals(RiskFabricJdbcSinkConfig.CompositeValueBindingMode.ROW_EXPRESSION)) {
+                String fieldName = field.name();
+                if (columnCaseType.equals(RiskFabricJdbcSinkConfig.ColumnCaseType.SNAKE_CASE)) {
+                    fieldName = StringUtils.toSnakeCase(fieldName);
                 }
-            })
-            .collect(Collectors.toList());
-    }
+                builder
+                    .append(fieldName)
+                    .append("=ROW(")
+                    .appendMultiple(",", "?", field.schemaFields().size())
+                    .append(")");
+            } else {
+                throw new NotSupportedException(compositeValueBindingMode.toString());
+            }
+        } else {
+            CharSequence fieldName = columnCaseType.equals(RiskFabricJdbcSinkConfig.ColumnCaseType.SNAKE_CASE) ?
+                StringUtils.toSnakeCase(field.name())
+                : field.name();
+            builder.append(fieldName);
+            builder.append("=?");
+        }
+    };
+
+    private ExpressionBuilder.Transform<SinkRecordField> excludeColumnNameTransform = (builder, field) -> {
+        if (field.schemaType().equals(Schema.Type.STRUCT)) {
+            if (compositeValueBindingMode.equals(RiskFabricJdbcSinkConfig.CompositeValueBindingMode.PROPERTY_AS_COLUMN)) {
+                builder
+                    .appendList()
+                        .delimitedBy(",")
+                        .of(field.schemaFields().stream().map(nestedField -> {
+                            String fieldName = field.name();
+                            String nestedFieldName = nestedField.name();
+                            if (columnCaseType.equals(RiskFabricJdbcSinkConfig.ColumnCaseType.SNAKE_CASE)) {
+                                fieldName = StringUtils.toSnakeCase(fieldName);
+                                nestedFieldName = StringUtils.toSnakeCase(nestedFieldName);
+                            }
+
+                            StringBuilder nestedBuilder = new StringBuilder();
+                            nestedBuilder.append(fieldName);
+                            nestedBuilder.append(".");
+                            nestedBuilder.append(nestedFieldName);
+                            nestedBuilder.append("=(EXCLUDED.");
+                            nestedBuilder.append(fieldName);
+                            nestedBuilder.append(").");
+                            nestedBuilder.append(nestedFieldName);
+
+                            return nestedBuilder.toString();
+                        }).collect(Collectors.toList()));
+            }
+            else if (compositeValueBindingMode.equals(RiskFabricJdbcSinkConfig.CompositeValueBindingMode.ROW_EXPRESSION)) {
+                String fieldName = field.name();
+                if (columnCaseType.equals(RiskFabricJdbcSinkConfig.ColumnCaseType.SNAKE_CASE)) {
+                    fieldName = StringUtils.toSnakeCase(fieldName);
+                }
+                builder
+                    .append(fieldName)
+                    .append("=EXCLUDED.")
+                    .append(fieldName);
+            }
+            else {
+                throw new NotSupportedException(compositeValueBindingMode.toString());
+            }
+        }
+        else
+        {
+           CharSequence fieldName = columnCaseType.equals(RiskFabricJdbcSinkConfig.ColumnCaseType.SNAKE_CASE) ?
+                StringUtils.toSnakeCase(field.name())
+                : field.name();
+
+           builder
+                .append(fieldName)
+                .append("=(EXCLUDED.");
+            boolean parenthesisClosed = false;
+
+            for (int i=0;i<fieldName.length();i++) {
+                if (fieldName.charAt(i) == '.') {
+                    // use case: there may be "." in a raw Avro field name if SMT::flatten STRUCT before the message entered the connector
+                    // otherwise "." is illegal in Avro schema field name
+                    builder.append(')');
+                    builder.append(fieldName.charAt(i));
+                    builder.append(fieldName.subSequence(i+1, fieldName.length()));
+                    parenthesisClosed = true;
+                    break;
+                }
+                else {
+                    builder.append(fieldName.charAt(i));
+                }
+            }
+            if (!parenthesisClosed) {
+                builder.append(')');
+            }
+        }
+    };
 }

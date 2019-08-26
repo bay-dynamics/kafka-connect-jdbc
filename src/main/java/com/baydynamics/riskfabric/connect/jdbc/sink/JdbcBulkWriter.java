@@ -3,7 +3,6 @@ package com.baydynamics.riskfabric.connect.jdbc.sink;
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
 import io.confluent.connect.jdbc.sink.DbStructure;
 import io.confluent.connect.jdbc.sink.GenericDbWriter;
-import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
 import io.confluent.connect.jdbc.util.TableId;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.slf4j.Logger;
@@ -16,7 +15,9 @@ import java.util.Collection;
 public class JdbcBulkWriter extends GenericDbWriter {
     private static final Logger log = LoggerFactory.getLogger(JdbcBulkWriter.class);
 
-    public JdbcBulkWriter(final JdbcSinkConfig config, DatabaseDialect dbDialect, DbStructure dbStructure){
+    private RiskFabricJdbcSinkConfig config = null;
+
+    public JdbcBulkWriter(final RiskFabricJdbcSinkConfig config, DatabaseDialect dbDialect, DbStructure dbStructure){
         super(config, dbDialect, dbStructure);
     }
 
@@ -27,7 +28,7 @@ public class JdbcBulkWriter extends GenericDbWriter {
         for (SinkRecord record : records) {
             if (copyStatement == null) {
                 final TableId tableId = destinationTable(record.topic());
-                copyStatement = new PgCopy(config, tableId, dbDialect, dbStructure, connection);
+                copyStatement = new PgCopy((RiskFabricJdbcSinkConfig)config, tableId, dbDialect, dbStructure, connection);
             }
             copyStatement.add(record);
         }

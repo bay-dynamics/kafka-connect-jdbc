@@ -152,28 +152,6 @@ public class PreparedStatementBinder implements StatementBinder {
     return index;
   }
 
-//  protected int bindNonKeyFields(
-//      SinkRecord record,
-//      Struct valueStruct,
-//      int index
-//  ) throws SQLException {
-//    for (final String fieldName : fieldsMetadata.nonKeyFieldNamesRaw) {
-//      final Field field = record.valueSchema().field(fieldName);
-//      if (field.schema().type().equals(Schema.Type.STRUCT)) {
-//        Struct nestedValueStruct = (Struct) valueStruct.get(field);
-//        index = bindCompositeField(index++, field.schema(), nestedValueStruct);
-//      }
-//      else {
-//        bindField(index++, field.schema(), valueStruct.get(field));
-//      }
-//    }
-//    return index;
-//  }
-
-//  protected int bindCompositeField(int index, Schema schema, Struct value) throws SQLException {
-//    return dialect.bindCompositeField(statement, index, schema, value);
-//  }
-
   protected int bindField(int index, Schema schema, Object value) throws SQLException {
     return dialect.bindField(statement, index, schema, value);
   }
