@@ -72,6 +72,7 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
             for (final Field nestedField : schema.fields()) {
                 bindNonCompositeField(statement, index++, nestedField.schema(), compositeValue.get(nestedField));
             }
+            index--; // 1 too far
           }
           else {
               bindNonCompositeField(statement, index, schema, value);
@@ -132,13 +133,13 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
         builder.append(" SET ");
         builder.appendList()
             .delimitedBy(",")
-            .transformedBy(upsertColumnNameTransform)
+            .transformedBy(updateValueTransform)
             .of(nonKeyFields);
         if (!keyFields.isEmpty()) {
             builder.append(" WHERE ");
             builder.appendList()
                 .delimitedBy(" AND ")
-                .transformedBy(updateValuePlaceHolderTransform)
+                .transformedBy(updateKeyTransform)
                 .of(keyFields);
         }
         return builder.toString();
@@ -269,12 +270,15 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
         }
     };
 
-    private ExpressionBuilder.Transform<SinkRecordField> updateValuePlaceHolderTransform = (builder, field) -> {
+    private ExpressionBuilder.Transform<SinkRecordField> updateValueTransform = (builder, field) -> this.updateTransform(builder, field, ",");
+    private ExpressionBuilder.Transform<SinkRecordField> updateKeyTransform = (builder, field) -> this.updateTransform(builder, field, " AND ");
+
+    private void updateTransform(ExpressionBuilder builder, SinkRecordField field, String delim) {
         if (field.schemaType().equals(Schema.Type.STRUCT)) {
             if (compositeValueBindingMode.equals(RiskFabricJdbcSinkConfig.CompositeValueBindingMode.PROPERTY_AS_COLUMN)) {
                 builder
                     .appendList()
-                    .delimitedBy(" AND ")
+                    .delimitedBy(delim)
                     .of(field.schemaFields().stream().map(nestedField -> {
                         String fieldName = field.name();
                         String nestedFieldName = nestedField.name();
@@ -306,30 +310,10 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
             }
         } else {
             CharSequence fieldName = columnCaseType.equals(RiskFabricJdbcSinkConfig.ColumnCaseType.SNAKE_CASE) ?
-                    StringUtils.toSnakeCase(field.name())
-                    : field.name();
-
-            builder
-                    .append(fieldName)
-                    .append("=(EXCLUDED.");
-            boolean parenthesisClosed = false;
-
-            for (int i = 0; i < fieldName.length(); i++) {
-                if (fieldName.charAt(i) == '.') {
-                    // use case: there may be "." in a raw Avro field name if a SMT::flatten a STRUCT before the message entered the connector
-                    // otherwise "." is illegal in Avro schema field name
-                    builder.append(')');
-                    builder.append(fieldName.charAt(i));
-                    builder.append(fieldName.subSequence(i + 1, fieldName.length()));
-                    parenthesisClosed = true;
-                    break;
-                } else {
-                    builder.append(fieldName.charAt(i));
-                }
-            }
-            if (!parenthesisClosed) {
-                builder.append(')');
-            }
+                StringUtils.toSnakeCase(field.name())
+                : field.name();
+            builder.append(fieldName);
+            builder.append("=?");
         }
     };
 
@@ -382,11 +366,11 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
            builder
                 .append(fieldName)
                 .append("=(EXCLUDED.");
-           boolean parenthesisClosed = false;
+            boolean parenthesisClosed = false;
 
             for (int i=0;i<fieldName.length();i++) {
                 if (fieldName.charAt(i) == '.') {
-                    // use case: there may be "." in a raw Avro field name if a SMT::flatten a STRUCT before the message entered the connector
+                    // use case: there may be "." in a raw Avro field name if SMT::flatten STRUCT before the message entered the connector
                     // otherwise "." is illegal in Avro schema field name
                     builder.append(')');
                     builder.append(fieldName.charAt(i));
