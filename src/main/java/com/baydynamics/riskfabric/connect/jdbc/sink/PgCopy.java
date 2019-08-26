@@ -8,13 +8,14 @@ import java.sql.SQLException;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import com.baydynamics.riskfabric.connect.data.UIDConverter;
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
 import io.confluent.connect.jdbc.sink.DbStructure;
 import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
 import io.confluent.connect.jdbc.sink.metadata.SchemaPair;
 import io.confluent.connect.jdbc.util.*;
-import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
+
+import com.baydynamics.riskfabric.connect.data.UIDConverter;
+import com.baydynamics.riskfabric.connect.jdbc.sink.RiskFabricJdbcSinkConfig;
 
 import org.apache.kafka.connect.data.*;
 import org.apache.kafka.connect.data.Date;
@@ -35,7 +36,7 @@ public class PgCopy {
   private final static char QUOTE_CHARACTER = '"';
 
   private final TableId tableId;
-  private final JdbcSinkConfig config;
+  private final RiskFabricJdbcSinkConfig config;
   private final DatabaseDialect dbDialect;
   private final DbStructure dbStructure;
   private final Connection connection;
@@ -54,7 +55,7 @@ public class PgCopy {
   private Struct parentValue;
 
   public PgCopy(
-          JdbcSinkConfig config,
+          RiskFabricJdbcSinkConfig config,
           TableId tableId,
           DatabaseDialect dbDialect,
           DbStructure dbStructure,
@@ -204,7 +205,7 @@ public class PgCopy {
 
   // Helpers
 
-  private Collection<ColumnId> asColumns(TableId tableId, Collection<String> names, JdbcSinkConfig.ColumnCaseType columnCaseType) {
+  private Collection<ColumnId> asColumns(TableId tableId, Collection<String> names, RiskFabricJdbcSinkConfig.ColumnCaseType columnCaseType) {
     return names.stream()
       .map(name -> new ColumnId(tableId, name))
       .collect(Collectors.toList());

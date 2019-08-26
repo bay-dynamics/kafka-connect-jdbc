@@ -14,7 +14,7 @@ public class RiskFabricJdbcSinkConfig extends JdbcSinkConfig {
 
     public enum CompositeValueBindingMode {
         ROW_EXPRESSION,
-        INDIVIDUAL_COLUMN,
+        PROPERTY_AS_COLUMN,
     }
 
     public final CompositeValueBindingMode compositeValueBindingMode;
@@ -24,7 +24,7 @@ public class RiskFabricJdbcSinkConfig extends JdbcSinkConfig {
     private static final String DIALECT_RISKFABRIC_COMPOSITE_VALUE_BINDING_MODE_DEFAULT = "row_expression";
     private static final String DIALECT_RISKFABRIC_COMPOSITE_VALUE_BINDING_MODE_DOC =
             "For RiskFabricDatabaseDialect, the binding mode to use for composite values (fields whose value is a STRUCT): \n"
-                    + "``row_expression``\n"
+                    + "``property_as_column``\n"
                     + "   fields are flattened and mapped to the composite destination column using a `.` semantic if it is supported by the connector, e.g.\n"
                     + "   INSERT INTO table(compositeColumn.property1, compositeColumn.compositeTypeProperty2) VALUES (<struct.field1.value>, <struct.field2.value>) statements.\n"
                     + "``row_expression``\n"
@@ -40,11 +40,8 @@ public class RiskFabricJdbcSinkConfig extends JdbcSinkConfig {
 
     private static final String RISKFABRIC_GROUP = "Risk Fabric";
 
-    public RiskFabricJdbcSinkConfig(Map<?, ?> props) {
+    public RiskFabricJdbcSinkConfig(Map<String, String> props) {
         super(props);
-
-        columnCaseType = ColumnCaseType.valueOf(getString(DIALECT_RISKFABRIC_TABLE_COLUMNS_CASE_TYPE).trim().toUpperCase());
-        compositeValueBindingMode = CompositeValueBindingMode.valueOf(getString(DIALECT_RISKFABRIC_COMPOSITE_VALUE_BINDING_MODE).trim().toUpperCase());
 
         CONFIG_DEF
             .define(
@@ -72,5 +69,16 @@ public class RiskFabricJdbcSinkConfig extends JdbcSinkConfig {
                 DIALECT_RISKFABRIC_TABLE_COLUMNS_CASE_TYPE_DISPLAY
             );
 
+        compositeValueBindingMode = CompositeValueBindingMode.valueOf(
+            ((String)props.getOrDefault(DIALECT_RISKFABRIC_COMPOSITE_VALUE_BINDING_MODE, DIALECT_RISKFABRIC_COMPOSITE_VALUE_BINDING_MODE_DEFAULT))
+                .trim()
+                .toUpperCase()
+        );
+
+        columnCaseType = ColumnCaseType.valueOf(
+            ((String)props.getOrDefault(DIALECT_RISKFABRIC_TABLE_COLUMNS_CASE_TYPE, DIALECT_RISKFABRIC_TABLE_COLUMNS_CASE_TYPE_DEFAULT))
+                .trim()
+                .toUpperCase()
+        );
     }
 }
