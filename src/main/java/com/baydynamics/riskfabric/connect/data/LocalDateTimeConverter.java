@@ -8,13 +8,13 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 
-public class EpochMillisConverter {
-    public static final String LOGICAL_NAME = "riskfabric.EPOCH_MILLIS";
+public class LocalDateTimeConverter {
+    public static final String LOGICAL_NAME = "com.baydynamics.riskfabric.avro.LocalDateTime";
 
     public static SchemaBuilder builder() {
         return SchemaBuilder.int64()
-                .name(LOGICAL_NAME)
-                .version(1);
+            .name(LOGICAL_NAME)
+            .version(1);
     }
 
     public static Schema schema() {
@@ -23,9 +23,9 @@ public class EpochMillisConverter {
 
     public static LocalDateTime toLogical(Schema schema, Object value) {
         if (!(LOGICAL_NAME.equals(schema.name()))) {
-            throw new DataException("Requested conversion of EpochMillis object but the schema does not match.");
+            throw new DataException("Requested conversion of " + schema.name() + "object but the schema does not match.");
         }
 
-        return LocalDateTime.ofInstant(Instant.ofEpochMilli((long) value), ZoneOffset.UTC); // no offset, epochs are produced as local timestamp
+        return LocalDateTime.ofInstant(Instant.ofEpochMilli((long) value), ZoneOffset.UTC); // use UTC for offset since the contract is LocalDateTime
     }
 }

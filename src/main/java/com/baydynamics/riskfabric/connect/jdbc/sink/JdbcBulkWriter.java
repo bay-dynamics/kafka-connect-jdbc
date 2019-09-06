@@ -15,8 +15,6 @@ import java.util.Collection;
 public class JdbcBulkWriter extends GenericDbWriter {
     private static final Logger log = LoggerFactory.getLogger(JdbcBulkWriter.class);
 
-    private RiskFabricJdbcSinkConfig config = null;
-
     public JdbcBulkWriter(final RiskFabricJdbcSinkConfig config, DatabaseDialect dbDialect, DbStructure dbStructure){
         super(config, dbDialect, dbStructure);
     }

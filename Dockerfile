@@ -10,4 +10,4 @@ COPY config/connect-log4j.properties /etc/kafka/connect-log4j.properties
 VOLUME /kafka-connect-jdbc/config
 VOLUME /kafka-connect-jdbc/offsets
 
-CMD CLASSPATH="$(find target/ -type f -name '*.jar'| grep '\-development' | tr '\n' ':')" connect-standalone config/worker.properties config/sink-riskfabric-db-upsert.properties
+CMD CLASSPATH="$(find target/ -type f -name '*.jar'| grep '\-development' | tr '\n' ':')" connect-standalone config/worker.properties config/sink-riskfabric-db-bulkcopy.properties
