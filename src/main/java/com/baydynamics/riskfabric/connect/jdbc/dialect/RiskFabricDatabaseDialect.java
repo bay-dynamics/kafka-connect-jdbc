@@ -1,6 +1,6 @@
 package com.baydynamics.riskfabric.connect.jdbc.dialect;
 
-import com.baydynamics.riskfabric.connect.data.EpochMillisConverter;
+import com.baydynamics.riskfabric.connect.data.LocalDateTimeConverter;
 import com.baydynamics.riskfabric.connect.data.UIDConverter;
 import com.baydynamics.riskfabric.connect.jdbc.sink.RiskFabricJdbcSinkConfig;
 
@@ -198,11 +198,11 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
                         java.sql.Types.OTHER
                     );
                     return true;
-                case EpochMillisConverter.LOGICAL_NAME:
+                case LocalDateTimeConverter.LOGICAL_NAME:
                     statement.setObject(
-                            index,
-                            EpochMillisConverter.toLogical(schema, value),
-                            Types.TIMESTAMP
+                        index,
+                        LocalDateTimeConverter.toLogical(schema, value),
+                        Types.TIMESTAMP
                     );
                     return true;
                 default:

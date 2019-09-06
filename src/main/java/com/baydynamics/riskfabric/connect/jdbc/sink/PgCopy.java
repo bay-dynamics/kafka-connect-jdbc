@@ -5,8 +5,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
 import io.confluent.connect.jdbc.sink.DbStructure;
@@ -15,7 +16,7 @@ import io.confluent.connect.jdbc.sink.metadata.SchemaPair;
 import io.confluent.connect.jdbc.util.*;
 
 import com.baydynamics.riskfabric.connect.data.UIDConverter;
-import com.baydynamics.riskfabric.connect.jdbc.sink.RiskFabricJdbcSinkConfig;
+import com.baydynamics.riskfabric.connect.data.LocalDateTimeConverter;
 
 import org.apache.kafka.connect.data.*;
 import org.apache.kafka.connect.data.Date;
@@ -34,6 +35,7 @@ public class PgCopy {
   private final static char COLUMN_DELIMITER = ',';
   private final static char ROW_DELIMITER = '\n';
   private final static char QUOTE_CHARACTER = '"';
+  private final static char ESCAPE_CHARACTER = '"';
 
   private final TableId tableId;
   private final RiskFabricJdbcSinkConfig config;
@@ -49,17 +51,17 @@ public class PgCopy {
   Collection<ColumnId> fieldNames;
 
   private final CopyManager copyManager;
-  private ExpressionBuilder copyCommand;
+  private StringBuilder copyCommand;
   private StringBuilder bufferBuilder = null;
   private int bufferWatermark;
   private Struct parentValue;
 
   public PgCopy(
-          RiskFabricJdbcSinkConfig config,
-          TableId tableId,
-          DatabaseDialect dbDialect,
-          DbStructure dbStructure,
-          Connection connection) throws SQLException {
+      RiskFabricJdbcSinkConfig config,
+      TableId tableId,
+      DatabaseDialect dbDialect,
+      DbStructure dbStructure,
+      Connection connection) throws SQLException {
 
     this.tableId = tableId;
     this.config = config;
@@ -97,72 +99,55 @@ public class PgCopy {
 
       // re-initialize everything that depends on the record schema
       final SchemaPair schemaPair = new SchemaPair(
-              record.keySchema(),
-              record.valueSchema()
+        record.keySchema(),
+        record.valueSchema()
       );
       fieldsMetadata = FieldsMetadata.extract(
-          tableId.tableName(),
-          config.pkMode,
-          config.pkFields,
-          config.fieldsWhitelist,
-          schemaPair
+        tableId.tableName(),
+        config.pkMode,
+        config.pkFields,
+        config.fieldsWhitelist,
+        schemaPair
       );
 
-      fieldNames = asColumns(tableId, fieldsMetadata.nonKeyFieldNames, config.columnCaseType);
-
-      copyCommand = dbDialect.expressionBuilder();
+      boolean firstColumn = true;
+      copyCommand = new StringBuilder();
       copyCommand.append("COPY ");
-      copyCommand.append(tableId);
+      copyCommand.append(tableId.schemaName() + "." + tableId.tableName());
       copyCommand.append(" (");
-      copyCommand.appendList()
-              .delimitedBy(",")
-              .transformedBy(ExpressionBuilder.columnNames())
-              .of(fieldNames);
-      copyCommand.append(") FROM STDIN CSV ");
-    }
-
-    // build CSV row, @TODO use expressionBuilder
-    boolean firstColum = true;
-    for (final String fieldName : fieldsMetadata.nonKeyFieldNames) {
-      if (!firstColum) {
-        bufferBuilder.append(COLUMN_DELIMITER);
-      }
-
-      int idx = fieldName.indexOf(".");
-
-      if (idx > 0) {
-        final String parentFieldName = fieldName.substring(0, idx);
-        final String childFieldName = fieldName.substring(idx+1);
-
-        final Field parentField = record.valueSchema().field(parentFieldName);
-        if (parentField != null && parentField.schema().type().equals(Schema.Type.STRUCT)) {
-
-          final Field childField = parentField.schema().field(childFieldName);
-          if (childField != null && !childField.schema().type().equals(Schema.Type.STRUCT)) {
-            Struct parentValue = (Struct)((Struct) record.value()).get(parentField);
-            Object childValue = parentValue.get(childFieldName);
-            appendColumnValue(bufferBuilder, childField.schema(), childValue);
-          }
-          else {
-            throw new ConnectException(String.format("Invalid field %s. Child field cannot be a STRUCT.", fieldName));
-          }
-
+      for (String fieldName : fieldsMetadata.nonKeyFieldNames) {
+        if (!firstColumn) {
+          copyCommand.append(COLUMN_DELIMITER);
         }
         else {
-          String msg = String.format("Invalid field %s. Parent field %s not found.", fieldName, parentFieldName);
-          log.error(msg);
-          throw new ConnectException(msg);
+          firstColumn = false;
+        }
+
+        if (config.columnCaseType == RiskFabricJdbcSinkConfig.ColumnCaseType.SNAKE_CASE) {
+          copyCommand.append(StringUtils.toSnakeCase(fieldName));
+        }
+        else {
+          copyCommand.append(fieldName);
         }
       }
-      else {
-        final Field field = record.valueSchema().field(fieldName);
-        final Object value = recordValue.get(field);
-        final Schema.Type type = field.schema().type();
+      copyCommand.append(") FROM STDIN WITH ");
+      copyCommand.append(" CSV ");
+      copyCommand.append(" QUOTE AS '" + QUOTE_CHARACTER + "' ");
+      copyCommand.append(" ESCAPE AS '" + ESCAPE_CHARACTER + "' ");
+    }
 
-        appendColumnValue(bufferBuilder, field.schema(), value);
+    boolean firstColumn = true;
+    for (final String fieldName : fieldsMetadata.nonKeyFieldNames) {
+      if (!firstColumn) {
+        bufferBuilder.append(COLUMN_DELIMITER);
+      }
+      else {
+        firstColumn = false;
       }
 
-      firstColum = false;
+      final Field field = record.valueSchema().field(fieldName);
+      final Object value = recordValue.get(field);
+      appendFieldValue(bufferBuilder, field.schema(), value, QUOTE_CHARACTER);
     }
     bufferBuilder.append(ROW_DELIMITER);
     bufferWatermark=bufferBuilder.length();
@@ -203,75 +188,120 @@ public class PgCopy {
     flush();
   }
 
-  // Helpers
-
-  private Collection<ColumnId> asColumns(TableId tableId, Collection<String> names, RiskFabricJdbcSinkConfig.ColumnCaseType columnCaseType) {
-    return names.stream()
-      .map(name -> new ColumnId(tableId, name))
-      .collect(Collectors.toList());
-  }
-
-  private void appendColumnValue(StringBuilder builder, Schema schema, Object value) {
+  private void appendFieldValue(StringBuilder builder, Schema schema , Object value, char quoteCharacter) {
     if (value == null) {
       return;
     }
     else {
-      if (schema.name() != null) {
-        switch (schema.name()) {
-          case UIDConverter.LOGICAL_NAME:
-            appendStringQuoted(builder, value);
-            return;
-          case Decimal.LOGICAL_NAME:
-            appendStringQuoted(builder, value);
-            return;
-          case Date.LOGICAL_NAME:
-            appendStringQuoted(builder, DateTimeUtils.formatDate((java.util.Date) value, config.timeZone));
-            return;
-          case Time.LOGICAL_NAME:
-            appendStringQuoted(builder, DateTimeUtils.formatTime((java.util.Date) value, config.timeZone));
-            return;
-          case org.apache.kafka.connect.data.Timestamp.LOGICAL_NAME:
-            appendStringQuoted(builder, DateTimeUtils.formatTimestamp((java.util.Date) value, config.timeZone));
-            return;
-          default:
-            // fall through to regular types
-            break;
+        if (schema.name() != null) {
+            switch (schema.name()) {
+                case UIDConverter.LOGICAL_NAME:
+                    appendValueQuoted(builder, (String)value, quoteCharacter);
+                    return;
+                case LocalDateTimeConverter.LOGICAL_NAME:
+                    appendValueQuoted(builder, LocalDateTimeConverter.toLogical(schema, value).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME), quoteCharacter);
+                    return;
+                case Decimal.LOGICAL_NAME:
+                    builder.append(value);
+                    return;
+                case Date.LOGICAL_NAME:
+                    appendValueQuoted(builder, DateTimeUtils.formatDate((java.util.Date) value, config.timeZone), quoteCharacter);
+                    return;
+                case Time.LOGICAL_NAME:
+                    appendValueQuoted(builder, DateTimeUtils.formatTime((java.util.Date) value, config.timeZone), quoteCharacter);
+                    return;
+                case org.apache.kafka.connect.data.Timestamp.LOGICAL_NAME:
+                    appendValueQuoted(builder, DateTimeUtils.formatTimestamp((java.util.Date) value, config.timeZone), quoteCharacter);
+                    return;
+                default:
+                // fall through to regular types
+                break;
+            }
         }
-      }
-      switch (schema.type()) {
-        case INT8:
-        case INT16:
-        case INT32:
-        case INT64:
-        case FLOAT32:
-        case FLOAT64:
-          // no escaping required
-          appendStringQuoted(builder, value.toString());
-          break;
-        case BOOLEAN:
-          // 1 & 0 for boolean is more portable rather than TRUE/FALSE
-          appendStringQuoted(builder, (Boolean) value ? '1' : '0');
-          break;
-        case STRING:
-          appendStringQuoted(builder, value.toString().replaceAll("\"", "\"\""));
-          break;
-        case BYTES:
-          final byte[] bytes;
-          if (value instanceof ByteBuffer) {
-            final ByteBuffer buffer = ((ByteBuffer) value).slice();
-            bytes = new byte[buffer.remaining()];
-            buffer.get(bytes);
-          } else {
-            bytes = (byte[]) value;
-          }
-          appendStringQuoted(builder, "x'"+ BytesUtil.toHex(bytes) + "'" );
-        default:
-          throw new ConnectException("Unsupported type for column value: " + schema.type());
-      }
+
+        switch (schema.type()) {
+            case INT8:
+            case INT16:
+            case INT32:
+            case INT64:
+            case FLOAT32:
+            case FLOAT64:
+              bufferBuilder.append(value.toString());
+              break;
+            case BOOLEAN:
+              // 1 & 0 for boolean is more portable rather than TRUE/FALSE
+              bufferBuilder.append((Boolean) value ? quoteCharacter + 1 + quoteCharacter : quoteCharacter + 0 + quoteCharacter);
+              break;
+            case STRING:
+              appendValueEscaped(builder, (String)value, quoteCharacter);
+              break;
+            case BYTES:
+              final byte[] bytes;
+              if (value instanceof ByteBuffer) {
+                final ByteBuffer buffer = ((ByteBuffer) value).slice();
+                bytes = new byte[buffer.remaining()];
+                buffer.get(bytes);
+              }
+              else {
+                bytes = (byte[]) value;
+              }
+              bufferBuilder.append("x'"+ BytesUtil.toHex(bytes) + "'");
+              break;
+            case STRUCT:
+              final Struct compositeValue = (Struct)value;
+              if (config.compositeValueBindingMode == RiskFabricJdbcSinkConfig.CompositeValueBindingMode.ROW_EXPRESSION) {
+                appendRowExpressionValue(builder, compositeValue, quoteCharacter,'\'');
+              }
+              else {
+                String msg = String.format("binding.mode=%s is not supported.", config.compositeValueBindingMode.toString());
+                log.error(msg);
+                throw new ConnectException(msg);
+              }
+              break;
+            default:
+              throw new ConnectException("Unsupported type for column value: " + schema.type());
+        }
     }
   }
 
-  private void appendStringQuoted(StringBuilder builder, Object value) {
-    builder.append(QUOTE_CHARACTER + value.toString() + QUOTE_CHARACTER);
+  private void appendRowExpressionValue(StringBuilder builder, Struct compositeValue, char quoteCharacter, char compositeValueQuoteCharacter) {
+    bufferBuilder.append(quoteCharacter);
+    // interestingly you have to omit ROW here otherwise it is not recognized by COPY
+    bufferBuilder.append("(");
+    boolean firstField = true;
+    for (final Field compositeField : compositeValue.schema().fields()) {
+      if (!firstField) {
+        bufferBuilder.append(COLUMN_DELIMITER);
+      }
+      else {
+        firstField = false;
+      }
+      Object compositeFieldValue = compositeValue.get(compositeField);
+      appendFieldValue(builder, compositeField.schema(), compositeFieldValue, compositeValueQuoteCharacter);
+    }
+    bufferBuilder.append(')');
+    bufferBuilder.append(quoteCharacter);
+  }
+
+  private void appendValueEscaped(StringBuilder builder, String value, char quoteCharacter) {
+    builder.append(quoteCharacter);
+    for (int i=0;i<value.length();i++) {
+      if (value.charAt(i) == ESCAPE_CHARACTER) {
+        bufferBuilder.append(ESCAPE_CHARACTER);
+        bufferBuilder.append(ESCAPE_CHARACTER);
+      } else if (value.charAt(i) == quoteCharacter) {
+        bufferBuilder.append(ESCAPE_CHARACTER);
+        bufferBuilder.append(quoteCharacter);
+      } else {
+        bufferBuilder.append(value.charAt(i));
+      }
+    }
+    builder.append(quoteCharacter);
+  }
+
+  private void appendValueQuoted(StringBuilder builder, String value, char quoteCharacter) {
+    builder.append(quoteCharacter);
+    builder.append(value);
+    builder.append(quoteCharacter);
   }
 }
