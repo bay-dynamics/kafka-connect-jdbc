@@ -17,6 +17,8 @@ import io.confluent.connect.jdbc.util.Version;
 
 import com.baydynamics.riskfabric.connect.jdbc.sink.RiskFabricJdbcSinkTask;
 
+import static io.confluent.connect.jdbc.sink.JdbcSinkConfig.INSERT_BULK_COPY_DELIVERY_MODE;
+
 public class RiskFabricSinkConnector extends SinkConnector {
     private static final Logger log = LoggerFactory.getLogger(RiskFabricSinkConnector.class);
 
@@ -38,9 +40,7 @@ public class RiskFabricSinkConnector extends SinkConnector {
 
     @Override
     public void start(Map<String, String> props) {
-
         //@TODO force properties to ensure RiskFabricDialect
-
         configProps = props;
     }
 

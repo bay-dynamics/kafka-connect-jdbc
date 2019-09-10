@@ -21,18 +21,22 @@ import io.confluent.connect.jdbc.sink.DbStructure;
 import io.confluent.connect.jdbc.sink.DbWriter;
 import io.confluent.connect.jdbc.sink.JdbcDbWriter;
 import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
+
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.RetriableException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
+import org.apache.kafka.connect.sink.SinkTaskContext;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
 import java.util.Collection;
 import java.util.Map;
+import java.util.Set;
 
 public class RiskFabricJdbcSinkTask extends SinkTask {
   private static final Logger log = LoggerFactory.getLogger(RiskFabricJdbcSinkTask.class);
@@ -42,24 +46,42 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
   DbWriter writer;
   int remainingRetries;
 
+  SinkTaskContext sinkTaskContext;
+  Collection<TopicPartition> topicsPartitions;
+
+  /**
+   * Initialise sink task
+   * @param context context of the sink task
+   */
   @Override
-  public void start(final Map<String, String> props) {
-    log.info("Starting JDBC Sink task");
+  public void initialize(SinkTaskContext context) {
+    sinkTaskContext=context;//save task context
+  }
+
+  @Override
+  public void start(final Map<String, String> props) throws ConnectException {
+    log.info("Starting Risk Fabric JDBC Sink task");
     config = new RiskFabricJdbcSinkConfig(props);
-    initWriter();
     remainingRetries = config.maxRetries;
   }
 
-  void initWriter() {
+  private DbWriter createWriter() {
     dialect = DatabaseDialects.create("RiskFabricDatabaseDialect", config);
     log.info("Initializing writer for insert.mode {} using SQL dialect: {}", config.insertMode, dialect.getClass().getSimpleName());
     final DbStructure dbStructure = new DbStructure(dialect);
     if (config.insertMode.equals(JdbcSinkConfig.InsertMode.BULKCOPY)) {
-      writer = new JdbcBulkWriter(config, dialect, dbStructure);
+        return new PgCopyWriter(config, dialect, dbStructure, topicsPartitions);
     }
     else {
-      writer = new JdbcDbWriter(config, dialect, dbStructure);
+        return new JdbcDbWriter(config, dialect, dbStructure);
     }
+  }
+
+  public void open(Collection<TopicPartition> partitions) {
+      topicsPartitions = partitions;
+      writer = createWriter();
+
+      super.open(partitions);
   }
 
   @Override
@@ -92,7 +114,7 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
         throw new ConnectException(new SQLException(sqleAllMessages));
       } else {
         writer.closeQuietly();
-        initWriter();
+        writer = createWriter();
         remainingRetries--;
         context.timeout(config.retryBackoffMs);
         throw new RetriableException(new SQLException(sqleAllMessages));
