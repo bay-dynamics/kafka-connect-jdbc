@@ -81,7 +81,6 @@ public class JdbcSinkConfig extends AbstractConfig {
 
   public enum DeliveryMode {
     FASTEST,
-    GUARANTEED,
     SYNCHRONIZED
   }
 

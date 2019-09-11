@@ -22,6 +22,7 @@ import io.confluent.connect.jdbc.sink.DbWriter;
 import io.confluent.connect.jdbc.sink.JdbcDbWriter;
 import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
 
+import io.confluent.connect.jdbc.util.TableId;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.ConnectException;
@@ -34,9 +35,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
-import java.util.Collection;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public class RiskFabricJdbcSinkTask extends SinkTask {
   private static final Logger log = LoggerFactory.getLogger(RiskFabricJdbcSinkTask.class);
@@ -47,7 +46,7 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
   int remainingRetries;
 
   SinkTaskContext sinkTaskContext;
-  Collection<TopicPartition> topicsPartitions;
+  Collection<TopicPartition> topicPartitions;
 
   /**
    * Initialise sink task
@@ -63,14 +62,26 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
     log.info("Starting Risk Fabric JDBC Sink task");
     config = new RiskFabricJdbcSinkConfig(props);
     remainingRetries = config.maxRetries;
+    writer = createWriter();
+
+    if (writer instanceof PgCopyWriterSynchronized) {
+      HashMap<TopicPartition,Long> offsetMaps = ((PgCopyWriterSynchronized) writer).getOffsetMaps();
+      sinkTaskContext.offset(offsetMaps);//synchronise offsets
+    }
   }
 
   private DbWriter createWriter() {
     dialect = DatabaseDialects.create("RiskFabricDatabaseDialect", config);
     log.info("Initializing writer for insert.mode {} using SQL dialect: {}", config.insertMode, dialect.getClass().getSimpleName());
     final DbStructure dbStructure = new DbStructure(dialect);
+
     if (config.insertMode.equals(JdbcSinkConfig.InsertMode.BULKCOPY)) {
-        return new PgCopyWriter(config, dialect, dbStructure, topicsPartitions);
+      if (config.bulkCopyDeliveryMode == JdbcSinkConfig.DeliveryMode.SYNCHRONIZED) {
+        return new PgCopyWriterSynchronized(config, dialect, dbStructure, topicPartitions);
+      }
+      else {
+        return new PgCopyWriter(config, dialect, dbStructure);
+      }
     }
     else {
         return new JdbcDbWriter(config, dialect, dbStructure);
@@ -78,9 +89,8 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
   }
 
   public void open(Collection<TopicPartition> partitions) {
-      topicsPartitions = partitions;
-      writer = createWriter();
-
+      // save for later
+      topicPartitions = partitions;
       super.open(partitions);
   }
 
