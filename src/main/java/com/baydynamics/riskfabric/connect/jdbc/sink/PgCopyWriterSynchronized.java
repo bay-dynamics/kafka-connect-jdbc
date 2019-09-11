@@ -20,33 +20,48 @@ import java.util.Optional;
 public class PgCopyWriterSynchronized extends GenericDbWriter {
     private static final Logger log = LoggerFactory.getLogger(PgCopyWriterSynchronized.class);
 
-    private Iterable<SinkTableState> state;
+    private Iterable<SinkTableState> initialState;
     private Collection<TopicPartition> partitions;
+    private TableId tableId;
+    private String topicName;
+    private Integer[] partitionIds;
 
     public PgCopyWriterSynchronized(final RiskFabricJdbcSinkConfig config, DatabaseDialect dbDialect, DbStructure dbStructure, Collection<TopicPartition> partitionAssignments) throws ConnectException
     {
         super(config, dbDialect, dbStructure);
 
         this.partitions = partitionAssignments;
-    }
-
-    public HashMap<TopicPartition,Long> getOffsetMaps() {
-        final Connection connection = cachedConnectionProvider.getConnection();
 
         // there is at least one by design
         Optional<TopicPartition> first = partitions.stream().findFirst();
-        final TableId tableId = destinationTable(first.get().topic());
+        topicName = first.get().topic();
+        tableId = destinationTable(topicName);
 
-        Object[] partitionIds = new Object[partitions.size()];
+        partitionIds = new Integer[partitions.size()];
         int i = 0;
         for (TopicPartition topicPartition : partitions) {
             partitionIds[i++] = topicPartition.partition();
         }
 
+        initialState = getState();
+    }
+
+    private Iterable<SinkTableState> getState() {
+        final Connection connection = cachedConnectionProvider.getConnection();
+        return SinkTableRoutines.getOrInitializeTopicPartitionState(connection, tableId.schemaName(), tableId.tableName(), topicName, partitionIds);
+    }
+
+    public HashMap<TopicPartition,Long> getNextOffsetMaps() {
+        HashMap<TopicPartition,Long> offsetMaps = getOffsetMaps();
+        // INCREMENT PERSISTED OFFSET BY 1 AS THE NEXT RECOVERY STARTING POSITION
+        offsetMaps.replaceAll((t,offset) -> (offset <= 0 ? 0 : offset + 1));
+        return offsetMaps;
+    }
+
+    public HashMap<TopicPartition,Long> getOffsetMaps() {
         HashMap<TopicPartition,Long> dbOffsetMap=new HashMap<>();
 
-        state = SinkTableRoutines.getOrInitializeTopicPartitionState(connection, tableId.schemaName(), tableId.tableName(), first.get().topic(), partitionIds);
-        for (SinkTableState partitionState : state) {
+        for (SinkTableState partitionState : getState()) {
             dbOffsetMap.put(new TopicPartition(partitionState.kafkaTopic(), partitionState.kafkaPartition()), partitionState.tableKafkaOffset());
         }
 
@@ -65,18 +80,11 @@ public class PgCopyWriterSynchronized extends GenericDbWriter {
         }
     }
 
-    private void writeOffsetMaps() {
-        for (SinkTableState partitionState : state) {
-
-        }
-    }
-
     public void write(final Collection<SinkRecord> records) throws SQLException {
         final Connection connection = cachedConnectionProvider.getConnection();
 
         // track offsets
-        HashMap latestOffsetByPartition = new HashMap<Integer, Long>();
-        partitions.forEach((p) -> latestOffsetByPartition.put(p.partition(), null));
+        HashMap<Integer, Long> latestOffsetByPartition = new HashMap<Integer, Long>();
 
         PgCopy copyStatement = null;
         for (SinkRecord record : records) {
@@ -85,13 +93,32 @@ public class PgCopyWriterSynchronized extends GenericDbWriter {
                 copyStatement = new PgCopy((RiskFabricJdbcSinkConfig)config, tableId, dbDialect, dbStructure, connection);
             }
             copyStatement.add(record);
-            latestOffsetByPartition.replace(record.kafkaPartition(), record.kafkaOffset());
+
+            if (latestOffsetByPartition.containsKey(record.kafkaPartition())) {
+                latestOffsetByPartition.replace(record.kafkaPartition(), record.kafkaOffset());
+            }
+            else {
+                latestOffsetByPartition.put(record.kafkaPartition(), record.kafkaOffset());
+            }
         }
 
         copyStatement.close();
 
+        // persist the offsets
+        Integer[] ids = new Integer[latestOffsetByPartition.size()];
+        Long[] newOffsets = new Long[latestOffsetByPartition.size()];
+        int i = 0;
+        for (Integer id : latestOffsetByPartition.keySet()) {
+            ids[i] = id;
+            newOffsets[i] = latestOffsetByPartition.get(id); //TODO do I need to increment by 1?
+            i++;
+        }
 
+        SinkTableRoutines.updateTopicPartitionState(connection, tableId.schemaName(), tableId.tableName(), topicName, ids, newOffsets);
 
-        connection.commit();
+        connection.commit(); // end of the transaction
+
+        // after this point, if the connector fails or kafka fails to commit its offset for the consumer group
+        // the connector may be restated and it would resynchronize from the persisted offset and carry on!
     }
 }

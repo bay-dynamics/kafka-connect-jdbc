@@ -6,7 +6,7 @@
 # Change this
 YOUR_HOST_PRIVATE_IP=192.168.33.33
 
-IMAGE_NAME=kafka-connect-jdbc
+IMAGE_NAME=kafka-connect-jdbc-riskfabric
 
 docker stop $IMAGE_NAME
 

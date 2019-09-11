@@ -3,16 +3,11 @@ package com.baydynamics.riskfabric.connect.jdbc.sink;
 import java.util.UUID;
 
 public class SinkTableState {
-    private UUID uid;
     private String schemaName;
     private String tableName;
     private String kafkaTopic;
     private int kafkaPartition;
     private long tableKafkaOffset;
-
-    public UUID uid() {
-        return uid;
-    }
 
     public String schemaName() {
         return schemaName;
@@ -32,10 +27,6 @@ public class SinkTableState {
 
     public long tableKafkaOffset() {
         return tableKafkaOffset;
-    }
-
-    public void setUid(UUID value) {
-        uid = value;
     }
 
     public void setSchemaName(String value) {
