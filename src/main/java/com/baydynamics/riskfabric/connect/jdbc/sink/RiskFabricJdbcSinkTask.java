@@ -22,7 +22,6 @@ import io.confluent.connect.jdbc.sink.DbWriter;
 import io.confluent.connect.jdbc.sink.JdbcDbWriter;
 import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
 
-import io.confluent.connect.jdbc.util.TableId;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.ConnectException;
@@ -66,7 +65,7 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
 
   private DbWriter createWriter(Collection<TopicPartition> partitionAssignements) {
     dialect = DatabaseDialects.create("RiskFabricDatabaseDialect", config);
-    log.info("Initializing writer for insert.mode {} using SQL dialect: {}", config.insertMode, dialect.getClass().getSimpleName());
+    log.info("Creating writer for insert.mode {} using SQL dialect: {}", config.insertMode, dialect.getClass().getSimpleName());
     final DbStructure dbStructure = new DbStructure(dialect);
 
     if (config.insertMode.equals(JdbcSinkConfig.InsertMode.BULKCOPY)) {
@@ -83,24 +82,30 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
   }
 
   public void open(Collection<TopicPartition> partitions) {
-      topicPartitions = partitions; // save for later
+    log.info("Open partitions");
+    topicPartitions = partitions; // save for later
 
-      // open is called on each poll, it seems, so don't recreate the writer
-      if (writer == null) {
+    // open is called on each poll, so don't recreate the writer every time
+    if (writer == null) {
+      // open() is called after start() and open is where the partitions are known
+      // with partitions known we can create the writer
+      writer = createWriter(partitions);
+      log.info("Writer of type {} created.", writer.getClass().getSimpleName());
 
-        // open() is called after start() and open is where the partitions are known
-        // with partitions known we can create the write
+      if (writer instanceof PgCopyWriterSynchronized) {
+        HashMap<TopicPartition, Long> offsetMaps;
+        offsetMaps = ((PgCopyWriterSynchronized) writer).getNextOffsetMaps();
+        sinkTaskContext.offset(offsetMaps);//synchronise offsets
 
-        writer = createWriter(partitions);
-
-        if (writer instanceof PgCopyWriterSynchronized) {
-          HashMap<TopicPartition, Long> offsetMaps;
-          offsetMaps = ((PgCopyWriterSynchronized) writer).getNextOffsetMaps();
-          sinkTaskContext.offset(offsetMaps);//synchronise offsets
+        String syncMessage = "Synchronize partitions:" + System.lineSeparator();
+        for (TopicPartition topicPartition : topicPartitions) {
+          syncMessage += String.format("* starting %s at offset [%d]" + System.lineSeparator(), topicPartition.toString(), offsetMaps.get(topicPartition));
         }
+        log.info(syncMessage);
       }
+    }
 
-      super.open(partitions);
+    super.open(partitions);
   }
 
   @Override
@@ -134,6 +139,7 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
       } else {
         writer.closeQuietly();
         writer = createWriter(topicPartitions);
+        log.info("New Writer of type {} created.", writer.getClass().getSimpleName());
         remainingRetries--;
         context.timeout(config.retryBackoffMs);
         throw new RetriableException(new SQLException(sqleAllMessages));
