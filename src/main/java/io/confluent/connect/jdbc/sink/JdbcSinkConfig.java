@@ -79,6 +79,11 @@ public class JdbcSinkConfig extends AbstractConfig {
     RECORD_VALUE;
   }
 
+  public enum DeliveryMode {
+    FASTEST,
+    SYNCHRONIZED
+  }
+
   public static final List<String> DEFAULT_KAFKA_PK_NAMES = Collections.unmodifiableList(
       Arrays.asList(
           "__connect_topic",
@@ -179,8 +184,17 @@ public class JdbcSinkConfig extends AbstractConfig {
   private static final int INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DEFAULT = 10000000;
   private static final String INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DOC =
       "Buffer size of the bulk copy command query in bytes, e.g. ``COPY``.\n"
-      + "When buffer size is reached the command is executed and a new batch is started.";
+      + "When buffer size is reached (with rounding error to terminate on complete record) the command is executed and a new batch is started.";
   private static final String INSERT_BULK_COPY_BUFFER_SIZE_BYTES_MODE_DISPLAY = "Bulk Copy Command Buffer Size (Bytes)";
+
+  public static final String INSERT_BULK_COPY_DELIVERY_MODE = "insert.bulkcopy.delivery.mode";
+  private static final String INSERT_BULK_COPY_DELIVERY_MODE_DEFAULT = "synchronized";
+  private static final String INSERT_BULK_COPY_DELIVERY_MODE_DOC =
+      "Delivery mode of the bulk copy command, e.g. ``COPY``.\n"
+      + "``fastest``\n"
+      + "``guaranteed``\n"
+      + "``synchronized``\n";
+  private static final String INSERT_BULK_COPY_DELIVERY_MODE_DISPLAY = "Bulk Copy delivery mode";
 
   public static final String PK_FIELDS = "pk.fields";
   private static final String PK_FIELDS_DEFAULT = "";
@@ -263,223 +277,234 @@ public class JdbcSinkConfig extends AbstractConfig {
       EnumRecommender.in(QuoteMethod.values());
 
   public static final ConfigDef CONFIG_DEF = new ConfigDef()
-        // Connection
-        .define(
-            CONNECTION_URL,
-            ConfigDef.Type.STRING,
-            ConfigDef.NO_DEFAULT_VALUE,
-            ConfigDef.Importance.HIGH,
-            CONNECTION_URL_DOC,
-            CONNECTION_GROUP,
-            1,
-            ConfigDef.Width.LONG,
-            CONNECTION_URL_DISPLAY
-        )
-        .define(
-            CONNECTION_USER,
-            ConfigDef.Type.STRING,
-            null,
-            ConfigDef.Importance.HIGH,
-            CONNECTION_USER_DOC,
-            CONNECTION_GROUP,
-            2,
-            ConfigDef.Width.MEDIUM,
-            CONNECTION_USER_DISPLAY
-        )
-        .define(
-            CONNECTION_PASSWORD,
-            ConfigDef.Type.PASSWORD,
-            null,
-            ConfigDef.Importance.HIGH,
-            CONNECTION_PASSWORD_DOC,
-            CONNECTION_GROUP,
-            3,
-            ConfigDef.Width.MEDIUM,
-            CONNECTION_PASSWORD_DISPLAY
-        )
-        .define(
-            DIALECT_NAME_CONFIG,
-            ConfigDef.Type.STRING,
-            DIALECT_NAME_DEFAULT,
-            DatabaseDialectRecommender.INSTANCE,
-            ConfigDef.Importance.LOW,
-            DIALECT_NAME_DOC,
-            CONNECTION_GROUP,
-            4,
-            ConfigDef.Width.LONG,
-            DIALECT_NAME_DISPLAY,
-            DatabaseDialectRecommender.INSTANCE
-        )
-        // Writes
-        .define(
-            INSERT_MODE,
-            ConfigDef.Type.STRING,
-            INSERT_MODE_DEFAULT,
-            EnumValidator.in(InsertMode.values()),
-            ConfigDef.Importance.HIGH,
-            INSERT_MODE_DOC,
-            WRITES_GROUP,
-            1,
-            ConfigDef.Width.MEDIUM,
-            INSERT_MODE_DISPLAY
-        )
-        .define(
-            BATCH_SIZE,
-            ConfigDef.Type.INT,
-            BATCH_SIZE_DEFAULT,
-            NON_NEGATIVE_INT_VALIDATOR,
-            ConfigDef.Importance.MEDIUM,
-            BATCH_SIZE_DOC, WRITES_GROUP,
-            2,
-            ConfigDef.Width.SHORT,
-            BATCH_SIZE_DISPLAY
-        )
-        .define(
-            DELETE_ENABLED,
-            ConfigDef.Type.BOOLEAN,
-            DELETE_ENABLED_DEFAULT,
-            ConfigDef.Importance.MEDIUM,
-            DELETE_ENABLED_DOC, WRITES_GROUP,
-            3,
-            ConfigDef.Width.SHORT,
-            DELETE_ENABLED_DISPLAY,
-            DeleteEnabledRecommender.INSTANCE
-        )
-        .define(
-            BATCH_KEY_DEDUP,
-            ConfigDef.Type.BOOLEAN,
-            BATCH_KEY_DEDUP_DEFAULT,
-            ConfigDef.Importance.HIGH,
-            BATCH_KEY_DEDUP_DOC, WRITES_GROUP,
-            4,
-            ConfigDef.Width.MEDIUM,
-            BATCH_KEY_DEDUP_DISPLAY
-        )
-        .define(
-            INSERT_BULK_COPY_BUFFER_SIZE_BYTES,
-            ConfigDef.Type.INT,
-            INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DEFAULT,
-            NON_NEGATIVE_INT_VALIDATOR,
-            ConfigDef.Importance.HIGH,
-            INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DOC, WRITES_GROUP,
-            5,
-            ConfigDef.Width.SHORT,
-            INSERT_BULK_COPY_BUFFER_SIZE_BYTES_MODE_DISPLAY
-        )
-        // Data Mapping
-        .define(
-            TABLE_NAME_FORMAT,
-            ConfigDef.Type.STRING,
-            TABLE_NAME_FORMAT_DEFAULT,
-            ConfigDef.Importance.MEDIUM,
-            TABLE_NAME_FORMAT_DOC,
-            DATAMAPPING_GROUP,
-            1,
-            ConfigDef.Width.LONG,
-            TABLE_NAME_FORMAT_DISPLAY
-        )
-        .define(
-            PK_MODE,
-            ConfigDef.Type.STRING,
-            PK_MODE_DEFAULT,
-            EnumValidator.in(PrimaryKeyMode.values()),
-            ConfigDef.Importance.HIGH,
-            PK_MODE_DOC,
-            DATAMAPPING_GROUP,
-            2,
-            ConfigDef.Width.MEDIUM,
-            PK_MODE_DISPLAY,
-            PrimaryKeyModeRecommender.INSTANCE
-        )
-        .define(
-            PK_FIELDS,
-            ConfigDef.Type.LIST,
-            PK_FIELDS_DEFAULT,
-            ConfigDef.Importance.MEDIUM,
-            PK_FIELDS_DOC,
-            DATAMAPPING_GROUP,
-            3,
-            ConfigDef.Width.LONG, PK_FIELDS_DISPLAY
-        )
-        .define(
-            FIELDS_WHITELIST,
-            ConfigDef.Type.LIST,
-            FIELDS_WHITELIST_DEFAULT,
-            ConfigDef.Importance.MEDIUM,
-            FIELDS_WHITELIST_DOC,
-            DATAMAPPING_GROUP,
-            4,
-            ConfigDef.Width.LONG,
-            FIELDS_WHITELIST_DISPLAY
-        ).define(
-            DB_TIMEZONE_CONFIG,
-            ConfigDef.Type.STRING,
-            DB_TIMEZONE_DEFAULT,
-            TimeZoneValidator.INSTANCE,
-            ConfigDef.Importance.MEDIUM,
-            DB_TIMEZONE_CONFIG_DOC,
-            DATAMAPPING_GROUP,
-            5,
-            ConfigDef.Width.MEDIUM,
-            DB_TIMEZONE_CONFIG_DISPLAY
-        )
-        // DDL
-        .define(
-            AUTO_CREATE,
-            ConfigDef.Type.BOOLEAN,
-            AUTO_CREATE_DEFAULT,
-            ConfigDef.Importance.MEDIUM,
-            AUTO_CREATE_DOC, DDL_GROUP,
-            1,
-            ConfigDef.Width.SHORT,
-            AUTO_CREATE_DISPLAY
-        )
-        .define(
-            AUTO_EVOLVE,
-            ConfigDef.Type.BOOLEAN,
-            AUTO_EVOLVE_DEFAULT,
-            ConfigDef.Importance.MEDIUM,
-            AUTO_EVOLVE_DOC, DDL_GROUP,
-            2,
-            ConfigDef.Width.SHORT,
-            AUTO_EVOLVE_DISPLAY
-        ).define(
-            QUOTE_SQL_IDENTIFIERS_CONFIG,
-            ConfigDef.Type.STRING,
-            QUOTE_SQL_IDENTIFIERS_DEFAULT,
-            ConfigDef.Importance.MEDIUM,
-            QUOTE_SQL_IDENTIFIERS_DOC,
-            DDL_GROUP,
-            3,
-            ConfigDef.Width.MEDIUM,
-            QUOTE_SQL_IDENTIFIERS_DISPLAY,
-            QUOTE_METHOD_RECOMMENDER
-        )
-        // Retries
-        .define(
-            MAX_RETRIES,
-            ConfigDef.Type.INT,
-            MAX_RETRIES_DEFAULT,
-            NON_NEGATIVE_INT_VALIDATOR,
-            ConfigDef.Importance.MEDIUM,
-            MAX_RETRIES_DOC,
-            RETRIES_GROUP,
-            1,
-            ConfigDef.Width.SHORT,
-            MAX_RETRIES_DISPLAY
-        )
-        .define(
-            RETRY_BACKOFF_MS,
-            ConfigDef.Type.INT,
-            RETRY_BACKOFF_MS_DEFAULT,
-            NON_NEGATIVE_INT_VALIDATOR,
-            ConfigDef.Importance.MEDIUM,
-            RETRY_BACKOFF_MS_DOC,
-            RETRIES_GROUP,
-            2,
-            ConfigDef.Width.SHORT,
-            RETRY_BACKOFF_MS_DISPLAY
-        );
+    // Connection
+    .define(
+      CONNECTION_URL,
+      ConfigDef.Type.STRING,
+      ConfigDef.NO_DEFAULT_VALUE,
+      ConfigDef.Importance.HIGH,
+      CONNECTION_URL_DOC,
+      CONNECTION_GROUP,
+      1,
+      ConfigDef.Width.LONG,
+      CONNECTION_URL_DISPLAY
+    )
+    .define(
+      CONNECTION_USER,
+      ConfigDef.Type.STRING,
+      null,
+      ConfigDef.Importance.HIGH,
+      CONNECTION_USER_DOC,
+      CONNECTION_GROUP,
+      2,
+      ConfigDef.Width.MEDIUM,
+      CONNECTION_USER_DISPLAY
+    )
+    .define(
+      CONNECTION_PASSWORD,
+      ConfigDef.Type.PASSWORD,
+      null,
+      ConfigDef.Importance.HIGH,
+      CONNECTION_PASSWORD_DOC,
+      CONNECTION_GROUP,
+      3,
+      ConfigDef.Width.MEDIUM,
+      CONNECTION_PASSWORD_DISPLAY
+    )
+    .define(
+      DIALECT_NAME_CONFIG,
+      ConfigDef.Type.STRING,
+      DIALECT_NAME_DEFAULT,
+      DatabaseDialectRecommender.INSTANCE,
+      ConfigDef.Importance.LOW,
+      DIALECT_NAME_DOC,
+      CONNECTION_GROUP,
+      4,
+      ConfigDef.Width.LONG,
+      DIALECT_NAME_DISPLAY,
+      DatabaseDialectRecommender.INSTANCE
+    )
+    // Writes
+    .define(
+      INSERT_MODE,
+      ConfigDef.Type.STRING,
+      INSERT_MODE_DEFAULT,
+      EnumValidator.in(InsertMode.values()),
+      ConfigDef.Importance.HIGH,
+      INSERT_MODE_DOC,
+      WRITES_GROUP,
+      1,
+      ConfigDef.Width.MEDIUM,
+      INSERT_MODE_DISPLAY
+    )
+    .define(
+      BATCH_SIZE,
+      ConfigDef.Type.INT,
+      BATCH_SIZE_DEFAULT,
+      NON_NEGATIVE_INT_VALIDATOR,
+      ConfigDef.Importance.MEDIUM,
+      BATCH_SIZE_DOC, WRITES_GROUP,
+      2,
+      ConfigDef.Width.SHORT,
+      BATCH_SIZE_DISPLAY
+    )
+    .define(
+      DELETE_ENABLED,
+      ConfigDef.Type.BOOLEAN,
+      DELETE_ENABLED_DEFAULT,
+      ConfigDef.Importance.MEDIUM,
+      DELETE_ENABLED_DOC, WRITES_GROUP,
+      3,
+      ConfigDef.Width.SHORT,
+      DELETE_ENABLED_DISPLAY,
+      DeleteEnabledRecommender.INSTANCE
+    )
+    .define(
+      BATCH_KEY_DEDUP,
+      ConfigDef.Type.BOOLEAN,
+      BATCH_KEY_DEDUP_DEFAULT,
+      ConfigDef.Importance.HIGH,
+      BATCH_KEY_DEDUP_DOC, WRITES_GROUP,
+      4,
+      ConfigDef.Width.MEDIUM,
+      BATCH_KEY_DEDUP_DISPLAY
+    )
+    .define(
+      INSERT_BULK_COPY_DELIVERY_MODE,
+      ConfigDef.Type.STRING,
+      INSERT_BULK_COPY_DELIVERY_MODE_DEFAULT,
+      EnumValidator.in(DeliveryMode.values()),
+      ConfigDef.Importance.HIGH,
+      INSERT_BULK_COPY_DELIVERY_MODE_DOC, WRITES_GROUP,
+      5,
+      ConfigDef.Width.MEDIUM,
+      INSERT_BULK_COPY_DELIVERY_MODE_DISPLAY
+    )
+    .define(
+      INSERT_BULK_COPY_BUFFER_SIZE_BYTES,
+      ConfigDef.Type.INT,
+      INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DEFAULT,
+      NON_NEGATIVE_INT_VALIDATOR,
+      ConfigDef.Importance.HIGH,
+      INSERT_BULK_COPY_BUFFER_SIZE_BYTES_DOC, WRITES_GROUP,
+      6,
+      ConfigDef.Width.MEDIUM,
+      INSERT_BULK_COPY_BUFFER_SIZE_BYTES_MODE_DISPLAY
+    )
+    // Data Mapping
+    .define(
+      TABLE_NAME_FORMAT,
+      ConfigDef.Type.STRING,
+      TABLE_NAME_FORMAT_DEFAULT,
+      ConfigDef.Importance.MEDIUM,
+      TABLE_NAME_FORMAT_DOC,
+      DATAMAPPING_GROUP,
+      1,
+      ConfigDef.Width.LONG,
+      TABLE_NAME_FORMAT_DISPLAY
+    )
+    .define(
+      PK_MODE,
+      ConfigDef.Type.STRING,
+      PK_MODE_DEFAULT,
+      EnumValidator.in(PrimaryKeyMode.values()),
+      ConfigDef.Importance.HIGH,
+      PK_MODE_DOC,
+      DATAMAPPING_GROUP,
+      2,
+      ConfigDef.Width.MEDIUM,
+      PK_MODE_DISPLAY,
+      PrimaryKeyModeRecommender.INSTANCE
+    )
+    .define(
+      PK_FIELDS,
+      ConfigDef.Type.LIST,
+      PK_FIELDS_DEFAULT,
+      ConfigDef.Importance.MEDIUM,
+      PK_FIELDS_DOC,
+      DATAMAPPING_GROUP,
+      3,
+      ConfigDef.Width.LONG, PK_FIELDS_DISPLAY
+    )
+    .define(
+      FIELDS_WHITELIST,
+      ConfigDef.Type.LIST,
+      FIELDS_WHITELIST_DEFAULT,
+      ConfigDef.Importance.MEDIUM,
+      FIELDS_WHITELIST_DOC,
+      DATAMAPPING_GROUP,
+      4,
+      ConfigDef.Width.LONG,
+      FIELDS_WHITELIST_DISPLAY
+    ).define(
+      DB_TIMEZONE_CONFIG,
+      ConfigDef.Type.STRING,
+      DB_TIMEZONE_DEFAULT,
+      TimeZoneValidator.INSTANCE,
+      ConfigDef.Importance.MEDIUM,
+      DB_TIMEZONE_CONFIG_DOC,
+      DATAMAPPING_GROUP,
+      5,
+      ConfigDef.Width.MEDIUM,
+      DB_TIMEZONE_CONFIG_DISPLAY
+    )
+    // DDL
+    .define(
+      AUTO_CREATE,
+      ConfigDef.Type.BOOLEAN,
+      AUTO_CREATE_DEFAULT,
+      ConfigDef.Importance.MEDIUM,
+      AUTO_CREATE_DOC, DDL_GROUP,
+      1,
+      ConfigDef.Width.SHORT,
+      AUTO_CREATE_DISPLAY
+    )
+    .define(
+      AUTO_EVOLVE,
+      ConfigDef.Type.BOOLEAN,
+      AUTO_EVOLVE_DEFAULT,
+      ConfigDef.Importance.MEDIUM,
+      AUTO_EVOLVE_DOC, DDL_GROUP,
+      2,
+      ConfigDef.Width.SHORT,
+      AUTO_EVOLVE_DISPLAY
+    ).define(
+      QUOTE_SQL_IDENTIFIERS_CONFIG,
+      ConfigDef.Type.STRING,
+      QUOTE_SQL_IDENTIFIERS_DEFAULT,
+      ConfigDef.Importance.MEDIUM,
+      QUOTE_SQL_IDENTIFIERS_DOC,
+      DDL_GROUP,
+      3,
+      ConfigDef.Width.MEDIUM,
+      QUOTE_SQL_IDENTIFIERS_DISPLAY,
+      QUOTE_METHOD_RECOMMENDER
+    )
+    // Retries
+    .define(
+      MAX_RETRIES,
+      ConfigDef.Type.INT,
+      MAX_RETRIES_DEFAULT,
+      NON_NEGATIVE_INT_VALIDATOR,
+      ConfigDef.Importance.MEDIUM,
+      MAX_RETRIES_DOC,
+      RETRIES_GROUP,
+      1,
+      ConfigDef.Width.SHORT,
+      MAX_RETRIES_DISPLAY
+    )
+    .define(
+      RETRY_BACKOFF_MS,
+      ConfigDef.Type.INT,
+      RETRY_BACKOFF_MS_DEFAULT,
+      NON_NEGATIVE_INT_VALIDATOR,
+      ConfigDef.Importance.MEDIUM,
+      RETRY_BACKOFF_MS_DOC,
+      RETRIES_GROUP,
+      2,
+      ConfigDef.Width.SHORT,
+      RETRY_BACKOFF_MS_DISPLAY
+    );
 
   public final String connectionUrl;
   public final JdbcConnectionConfig jdbcConnectionConfig;
@@ -501,6 +526,7 @@ public class JdbcSinkConfig extends AbstractConfig {
   public final String dialectName;
   public final TimeZone timeZone;
   public final int bulkCopyBufferSizeBytes;
+  public final DeliveryMode bulkCopyDeliveryMode;
 
   public JdbcSinkConfig(Map<?, ?> props) {
     super(CONFIG_DEF, props);
@@ -526,6 +552,7 @@ public class JdbcSinkConfig extends AbstractConfig {
     String dbTimeZone = getString(DB_TIMEZONE_CONFIG);
     timeZone = TimeZone.getTimeZone(ZoneId.of(dbTimeZone));
     bulkCopyBufferSizeBytes = getInt(INSERT_BULK_COPY_BUFFER_SIZE_BYTES);
+    bulkCopyDeliveryMode = DeliveryMode.valueOf(getString(INSERT_BULK_COPY_DELIVERY_MODE).toUpperCase());
 
     if (deleteEnabled && pkMode != PrimaryKeyMode.RECORD_KEY) {
       throw new ConfigException(

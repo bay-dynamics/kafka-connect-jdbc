@@ -21,18 +21,20 @@ import io.confluent.connect.jdbc.sink.DbStructure;
 import io.confluent.connect.jdbc.sink.DbWriter;
 import io.confluent.connect.jdbc.sink.JdbcDbWriter;
 import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
+
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.RetriableException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
+import org.apache.kafka.connect.sink.SinkTaskContext;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
-import java.util.Collection;
-import java.util.Map;
+import java.util.*;
 
 public class RiskFabricJdbcSinkTask extends SinkTask {
   private static final Logger log = LoggerFactory.getLogger(RiskFabricJdbcSinkTask.class);
@@ -42,24 +44,68 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
   DbWriter writer;
   int remainingRetries;
 
+  SinkTaskContext sinkTaskContext;
+  Collection<TopicPartition> topicPartitions;
+
+  /**
+   * Initialise sink task
+   * @param context context of the sink task
+   */
   @Override
-  public void start(final Map<String, String> props) {
-    log.info("Starting JDBC Sink task");
+  public void initialize(SinkTaskContext context) {
+    sinkTaskContext=context;//save task context
+  }
+
+  @Override
+  public void start(final Map<String, String> props) throws ConnectException {
+    log.info("Starting Risk Fabric JDBC Sink task");
     config = new RiskFabricJdbcSinkConfig(props);
-    initWriter();
     remainingRetries = config.maxRetries;
   }
 
-  void initWriter() {
+  private DbWriter createWriter(Collection<TopicPartition> partitionAssignements) {
     dialect = DatabaseDialects.create("RiskFabricDatabaseDialect", config);
-    log.info("Initializing writer for insert.mode {} using SQL dialect: {}", config.insertMode, dialect.getClass().getSimpleName());
+    log.info("Creating writer for insert.mode {} using SQL dialect: {}", config.insertMode, dialect.getClass().getSimpleName());
     final DbStructure dbStructure = new DbStructure(dialect);
+
     if (config.insertMode.equals(JdbcSinkConfig.InsertMode.BULKCOPY)) {
-      writer = new JdbcBulkWriter(config, dialect, dbStructure);
+      if (config.bulkCopyDeliveryMode == JdbcSinkConfig.DeliveryMode.SYNCHRONIZED) {
+        return new PgCopyWriterSynchronized(config, dialect, dbStructure, partitionAssignements);
+      }
+      else {
+        return new PgCopyWriter(config, dialect, dbStructure);
+      }
     }
     else {
-      writer = new JdbcDbWriter(config, dialect, dbStructure);
+        return new JdbcDbWriter(config, dialect, dbStructure);
     }
+  }
+
+  public void open(Collection<TopicPartition> partitions) {
+    log.info("Open partitions");
+    topicPartitions = partitions; // save for later
+
+    // open is called on each poll, so don't recreate the writer every time
+    if (writer == null) {
+      // open() is called after start() and open is where the partitions are known
+      // with partitions known we can create the writer
+      writer = createWriter(partitions);
+      log.info("Writer of type {} created.", writer.getClass().getSimpleName());
+
+      if (writer instanceof PgCopyWriterSynchronized) {
+        HashMap<TopicPartition, Long> offsetMaps;
+        offsetMaps = ((PgCopyWriterSynchronized) writer).getNextOffsetMaps();
+        sinkTaskContext.offset(offsetMaps);//synchronise offsets
+
+        String syncMessage = "Synchronize partitions:" + System.lineSeparator();
+        for (TopicPartition topicPartition : topicPartitions) {
+          syncMessage += String.format("* starting %s at offset [%d]" + System.lineSeparator(), topicPartition.toString(), offsetMaps.get(topicPartition));
+        }
+        log.info(syncMessage);
+      }
+    }
+
+    super.open(partitions);
   }
 
   @Override
@@ -92,7 +138,8 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
         throw new ConnectException(new SQLException(sqleAllMessages));
       } else {
         writer.closeQuietly();
-        initWriter();
+        writer = createWriter(topicPartitions);
+        log.info("New Writer of type {} created.", writer.getClass().getSimpleName());
         remainingRetries--;
         context.timeout(config.retryBackoffMs);
         throw new RetriableException(new SQLException(sqleAllMessages));
