@@ -8,8 +8,8 @@ import org.slf4j.LoggerFactory;
 import java.sql.*;
 import java.util.ArrayList;
 
-// NH: SinkTableState is crappy name/model, I expect it will change
-// tracking offset per table per topic per partition will most likely fall into other kafka administrative table that we are developing in other projects
+// NH: SinkTableState is a crappy name/model, I expect it to change.
+// Tracking offset per table per topic per partition will most likely move into other kafka administrative tables that are being developed in other projects.
 public class SinkTableRoutines {
     private static final Logger log = LoggerFactory.getLogger(SinkTableRoutines.class);
 
@@ -18,10 +18,10 @@ public class SinkTableRoutines {
         PreparedStatement statement = null;
         try {
             statement = conn.prepareStatement("SELECT * FROM get_or_initialize_kafka_connect_sink_table_state(?,?,?,?)");
-            statement.setString(1, schema);
-            statement.setString(2, tableName);
-            statement.setString(3, topicName);
-            statement.setArray(4, conn.createArrayOf("integer", partitionIds));
+            statement.setString(1, topicName);
+            statement.setArray(2, conn.createArrayOf("integer", partitionIds));
+            statement.setString(3, tableName);
+            statement.setString(4, schema);
 
             ArrayList<SinkTableState> state = new ArrayList<SinkTableState>();
 
@@ -67,11 +67,11 @@ public class SinkTableRoutines {
         PreparedStatement statement = null;
         try {
             statement = conn.prepareStatement("SELECT * FROM update_kafka_connect_sink_table_state(?,?,?,?,?)");
-            statement.setString(1, schema);
-            statement.setString(2, tableName);
-            statement.setString(3, topicName);
-            statement.setArray(4, conn.createArrayOf("integer", partitionIds));
-            statement.setArray(5, conn.createArrayOf("bigint", partitionOffsets));
+            statement.setString(1, topicName);
+            statement.setArray(2, conn.createArrayOf("integer", partitionIds));
+            statement.setArray(3, conn.createArrayOf("bigint", partitionOffsets));
+            statement.setString(4, tableName);
+            statement.setString(5, schema);
 
             ResultSet rs = statement.executeQuery();
         }

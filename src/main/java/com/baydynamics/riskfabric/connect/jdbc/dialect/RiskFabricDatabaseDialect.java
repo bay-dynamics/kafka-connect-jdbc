@@ -9,6 +9,7 @@ import io.confluent.connect.jdbc.dialect.DatabaseDialectProvider;
 import io.confluent.connect.jdbc.dialect.PostgreSqlDatabaseDialect;
 import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
 import io.confluent.connect.jdbc.sink.metadata.SinkRecordField;
+import io.confluent.connect.jdbc.source.JdbcSourceTaskConfig;
 import io.confluent.connect.jdbc.util.*;
 
 import org.apache.kafka.connect.data.Struct;
@@ -53,6 +54,11 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
             columnCaseType = RiskFabricJdbcSinkConfig.ColumnCaseType.valueOf(config.getString(RiskFabricJdbcSinkConfig.DIALECT_RISKFABRIC_TABLE_COLUMNS_CASE_TYPE_DEFAULT).trim().toUpperCase());
             compositeValueBindingMode = RiskFabricJdbcSinkConfig.CompositeValueBindingMode.valueOf(config.getString(RiskFabricJdbcSinkConfig.DIALECT_RISKFABRIC_COMPOSITE_VALUE_BINDING_MODE).trim().toUpperCase());
         }
+    }
+
+    //break encapsulation, would need to move PgCopy into the Dialect to not do that, and all the refactoring that entails.
+    public String getSchemaPattern() {
+        return schemaPattern;
     }
 
     @Override

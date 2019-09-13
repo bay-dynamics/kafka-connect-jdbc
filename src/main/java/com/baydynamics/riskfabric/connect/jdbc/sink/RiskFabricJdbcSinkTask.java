@@ -30,6 +30,8 @@ import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
 import org.apache.kafka.connect.sink.SinkTaskContext;
 
+import com.baydynamics.riskfabric.connect.jdbc.dialect.RiskFabricDatabaseDialect;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -65,19 +67,24 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
 
   private DbWriter createWriter(Collection<TopicPartition> partitionAssignements) {
     dialect = DatabaseDialects.create("RiskFabricDatabaseDialect", config);
-    log.info("Creating writer for insert.mode {} using SQL dialect: {}", config.insertMode, dialect.getClass().getSimpleName());
-    final DbStructure dbStructure = new DbStructure(dialect);
+
+    //break encapsulation, would need to move PgCopy into the Dialect to not do that, and the refactoring that it entails.
+    RiskFabricDatabaseDialect rfDialect = (RiskFabricDatabaseDialect) dialect;
+
+    log.info("Creating writer for insert.mode {} using {} dialect", config.insertMode, dialect.getClass().getSimpleName());
+    final DbStructure dbStructure = new DbStructure(rfDialect);
 
     if (config.insertMode.equals(JdbcSinkConfig.InsertMode.BULKCOPY)) {
       if (config.bulkCopyDeliveryMode == JdbcSinkConfig.DeliveryMode.SYNCHRONIZED) {
-        return new PgCopyWriterSynchronized(config, dialect, dbStructure, partitionAssignements);
+
+        return new PgCopyWriterSynchronized(config, rfDialect, dbStructure, partitionAssignements);
       }
       else {
-        return new PgCopyWriter(config, dialect, dbStructure);
+        return new PgCopyWriter(config, rfDialect, dbStructure);
       }
     }
     else {
-        return new JdbcDbWriter(config, dialect, dbStructure);
+        return new JdbcDbWriter(config, rfDialect, dbStructure);
     }
   }
 

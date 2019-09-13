@@ -8,6 +8,7 @@ import java.sql.SQLException;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
+import com.baydynamics.riskfabric.connect.jdbc.dialect.RiskFabricDatabaseDialect;
 import io.confluent.connect.jdbc.dialect.DatabaseDialect;
 import io.confluent.connect.jdbc.sink.DbStructure;
 import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
@@ -38,7 +39,7 @@ public class PgCopy {
 
   private final TableId tableId;
   private final RiskFabricJdbcSinkConfig config;
-  private final DatabaseDialect dbDialect;
+  private final RiskFabricDatabaseDialect dbDialect;
   private final DbStructure dbStructure;
   private final Connection connection;
 
@@ -58,7 +59,7 @@ public class PgCopy {
   public PgCopy(
       RiskFabricJdbcSinkConfig config,
       TableId tableId,
-      DatabaseDialect dbDialect,
+      RiskFabricDatabaseDialect dbDialect,
       DbStructure dbStructure,
       Connection connection) throws SQLException {
 
@@ -112,7 +113,7 @@ public class PgCopy {
       boolean firstColumn = true;
       copyCommand = new StringBuilder();
       copyCommand.append("COPY ");
-      copyCommand.append(tableId.schemaName() + "." + tableId.tableName());
+      copyCommand.append((tableId.schemaName() != null ? tableId.schemaName() + "." : "" ) + tableId.tableName());
       copyCommand.append(" (");
       for (String fieldName : fieldsMetadata.nonKeyFieldNames) {
         if (!firstColumn) {
