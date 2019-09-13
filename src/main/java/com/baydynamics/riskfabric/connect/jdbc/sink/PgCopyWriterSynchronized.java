@@ -1,11 +1,12 @@
 package com.baydynamics.riskfabric.connect.jdbc.sink;
 
-import io.confluent.connect.jdbc.dialect.DatabaseDialect;
+import com.baydynamics.riskfabric.connect.jdbc.dialect.RiskFabricDatabaseDialect;
 import io.confluent.connect.jdbc.sink.DbStructure;
 import io.confluent.connect.jdbc.util.TableId;
 import io.confluent.connect.jdbc.sink.GenericDbWriter;
 
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.slf4j.Logger;
@@ -26,7 +27,7 @@ public class PgCopyWriterSynchronized extends GenericDbWriter {
     private String topicName;
     private Integer[] partitionIds;
 
-    public PgCopyWriterSynchronized(final RiskFabricJdbcSinkConfig config, DatabaseDialect dbDialect, DbStructure dbStructure, Collection<TopicPartition> partitionAssignments) throws ConnectException
+    public PgCopyWriterSynchronized(final RiskFabricJdbcSinkConfig config, RiskFabricDatabaseDialect dbDialect, DbStructure dbStructure, Collection<TopicPartition> partitionAssignments) throws ConnectException
     {
         super(config, dbDialect, dbStructure);
 
@@ -53,7 +54,7 @@ public class PgCopyWriterSynchronized extends GenericDbWriter {
 
     public HashMap<TopicPartition,Long> getNextOffsetMaps() {
         HashMap<TopicPartition,Long> offsetMaps = getOffsetMaps();
-        // INCREMENT PERSISTED OFFSET BY 1 AS THE NEXT RECOVERY STARTING POSITION
+        // INCREMENT PERSISTED OFFSET BY 1 AS THE NEXT STARTING POSITION
         offsetMaps.replaceAll((t,offset) -> (offset <= 0 ? 0 : offset + 1));
         return offsetMaps;
     }
@@ -90,7 +91,7 @@ public class PgCopyWriterSynchronized extends GenericDbWriter {
         for (SinkRecord record : records) {
             if (copyStatement == null) {
                 final TableId tableId = destinationTable(record.topic());
-                copyStatement = new PgCopy((RiskFabricJdbcSinkConfig)config, tableId, dbDialect, dbStructure, connection);
+                copyStatement = new PgCopy((RiskFabricJdbcSinkConfig)config, tableId, (RiskFabricDatabaseDialect)dbDialect, dbStructure, connection);
             }
             copyStatement.add(record);
 
@@ -110,7 +111,7 @@ public class PgCopyWriterSynchronized extends GenericDbWriter {
         int i = 0;
         for (Integer id : latestOffsetByPartition.keySet()) {
             ids[i] = id;
-            newOffsets[i] = latestOffsetByPartition.get(id); //TODO do I need to increment by 1?
+            newOffsets[i] = latestOffsetByPartition.get(id);
             i++;
         }
 
