@@ -56,6 +56,8 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
   @Override
   public void initialize(SinkTaskContext context) {
     sinkTaskContext=context;//save task context
+
+
   }
 
   @Override
@@ -63,29 +65,11 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
     log.info("Starting Risk Fabric JDBC Sink task");
     config = new RiskFabricJdbcSinkConfig(props);
     remainingRetries = config.maxRetries;
+    dialect = DatabaseDialects.create("RiskFabricDatabaseDialect", config);
   }
 
   private DbWriter createWriter(Collection<TopicPartition> partitionAssignements) {
-    dialect = DatabaseDialects.create("RiskFabricDatabaseDialect", config);
-
-    //break encapsulation, would need to move PgCopy into the Dialect to not do that, and the refactoring that it entails.
-    RiskFabricDatabaseDialect rfDialect = (RiskFabricDatabaseDialect) dialect;
-
-    log.info("Creating writer for insert.mode {} using {} dialect", config.insertMode, dialect.getClass().getSimpleName());
-    final DbStructure dbStructure = new DbStructure(rfDialect);
-
-    if (config.insertMode.equals(JdbcSinkConfig.InsertMode.BULKCOPY)) {
-      if (config.bulkCopyDeliveryMode == JdbcSinkConfig.DeliveryMode.SYNCHRONIZED) {
-
-        return new PgCopyWriterSynchronized(config, rfDialect, dbStructure, partitionAssignements);
-      }
-      else {
-        return new PgCopyWriter(config, rfDialect, dbStructure);
-      }
-    }
-    else {
-        return new JdbcDbWriter(config, rfDialect, dbStructure);
-    }
+    return null;
   }
 
   public void open(Collection<TopicPartition> partitions) {
@@ -96,20 +80,31 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
     if (writer == null) {
       // open() is called after start() and open is where the partitions are known
       // with partitions known we can create the writer
-      writer = createWriter(partitions);
-      log.info("Writer of type {} created.", writer.getClass().getSimpleName());
 
-      if (writer instanceof PgCopyWriterSynchronized) {
-        HashMap<TopicPartition, Long> offsetMaps;
-        offsetMaps = ((PgCopyWriterSynchronized) writer).getNextOffsetMaps();
-        sinkTaskContext.offset(offsetMaps);//synchronise offsets
+      log.info("Creating writer for insert.mode {} using {} dialect", config.insertMode, dialect.getClass().getSimpleName());
+      final DbStructure dbStructure = new DbStructure(dialect);
+      if (config.insertMode.equals(JdbcSinkConfig.InsertMode.BULKCOPY)) {
+        PgCopyWriter pgWriter = new PgCopyWriter(config, (RiskFabricDatabaseDialect) dialect, dbStructure);
+        if (config.bulkCopyDeliveryMode == JdbcSinkConfig.DeliveryMode.SYNCHRONIZED) {
+          pgWriter.trackOffsets(partitions);
 
-        String syncMessage = "Synchronize partitions:" + System.lineSeparator();
-        for (TopicPartition topicPartition : topicPartitions) {
-          syncMessage += String.format("* starting %s at offset [%d]" + System.lineSeparator(), topicPartition.toString(), offsetMaps.get(topicPartition));
+          HashMap<TopicPartition, Long> offsetMap = pgWriter.getOffsetMap();
+          sinkTaskContext.offset(pgWriter.getOffsetMap());//synchronise offsets
+
+          String syncMessage = "Synchronized partitions:" + System.lineSeparator();
+          for (TopicPartition topicPartition : topicPartitions) {
+            syncMessage += String.format("* starting %s at offset [%d]" + System.lineSeparator(), topicPartition.toString(), offsetMap.get(topicPartition));
+          }
+          log.info(syncMessage);
+
+          writer = pgWriter;
         }
-        log.info(syncMessage);
       }
+      else {
+        writer = new JdbcDbWriter(config, dialect, dbStructure);
+      }
+
+      log.info("Writer of type {} created.", writer.getClass().getSimpleName());
     }
 
     super.open(partitions);
@@ -149,6 +144,8 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
         log.info("New Writer of type {} created.", writer.getClass().getSimpleName());
         remainingRetries--;
         context.timeout(config.retryBackoffMs);
+
+        // Connect will pause and attempt redelivery of the put batch
         throw new RetriableException(new SQLException(sqleAllMessages));
       }
     }
@@ -181,5 +178,4 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
   public String version() {
     return getClass().getPackage().getImplementationVersion();
   }
-
 }

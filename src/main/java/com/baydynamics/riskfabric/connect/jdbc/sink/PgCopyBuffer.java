@@ -9,7 +9,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 import com.baydynamics.riskfabric.connect.jdbc.dialect.RiskFabricDatabaseDialect;
-import io.confluent.connect.jdbc.dialect.DatabaseDialect;
 import io.confluent.connect.jdbc.sink.DbStructure;
 import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
 import io.confluent.connect.jdbc.sink.metadata.SchemaPair;
@@ -29,8 +28,8 @@ import org.postgresql.copy.CopyManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class PgCopy {
-  private static final Logger log = LoggerFactory.getLogger(PgCopy.class);
+public class PgCopyBuffer {
+  private static final Logger log = LoggerFactory.getLogger(PgCopyBuffer.class);
 
   private final static char COLUMN_DELIMITER = ',';
   private final static char ROW_DELIMITER = '\n';
@@ -56,7 +55,10 @@ public class PgCopy {
   private int bufferWatermark;
   private Struct parentValue;
 
-  public PgCopy(
+  //Offset management
+  HashMap<Integer, Long> offsetByPartition = new HashMap<Integer, Long>();
+
+  public PgCopyBuffer(
       RiskFabricJdbcSinkConfig config,
       TableId tableId,
       RiskFabricDatabaseDialect dbDialect,
@@ -152,6 +154,13 @@ public class PgCopy {
     bufferBuilder.append(ROW_DELIMITER);
     bufferWatermark=bufferBuilder.length();
 
+    if (offsetByPartition.containsKey(record.kafkaPartition())) {
+      offsetByPartition.replace(record.kafkaPartition(), record.kafkaOffset());
+    }
+    else {
+      offsetByPartition.put(record.kafkaPartition(), record.kafkaOffset());
+    }
+
     records.add(record);
 
     if (records.size() >= config.batchSize || bufferBuilder.length() >= config.bulkCopyBufferSizeBytes) {
@@ -167,25 +176,31 @@ public class PgCopy {
       return new ArrayList<>();
     }
 
+    final List<SinkRecord> flushedRecords;
     if (bufferWatermark > 0) {
       try {
         copyManager.copyIn(copyCommand.toString(), new StringReader(bufferBuilder.substring(0, bufferWatermark).toString()));
         bufferBuilder.delete(0, bufferWatermark);//remove written rows from the buffer
         bufferWatermark = 0;
+
+        flushedRecords = records;
+        onFlush(flushedRecords, offsetByPartition);
       }
       catch (IOException exception) {
         throw new SQLException(exception.getMessage());
       }
     }
-
-    final List<SinkRecord> flushedRecords = records;
+    else {
+      flushedRecords = new ArrayList<>();
+    }
 
     this.records = new ArrayList<>();
     return flushedRecords;
   }
 
-  public void close() throws SQLException {
-    flush();
+
+  protected void onFlush(List<SinkRecord> flushedRecords, HashMap<Integer, Long> flushedOffsets) throws SQLException {
+
   }
 
   private void appendFieldValue(StringBuilder builder, Schema schema , Object value, char quoteCharacter) {

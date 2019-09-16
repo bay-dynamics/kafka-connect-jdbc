@@ -1,43 +1,145 @@
 package com.baydynamics.riskfabric.connect.jdbc.sink;
 
+import com.baydynamics.riskfabric.connect.jdbc.dialect.RiskFabricDatabaseDialect;
 import io.confluent.connect.jdbc.sink.DbStructure;
-import io.confluent.connect.jdbc.sink.GenericDbWriter;
 import io.confluent.connect.jdbc.util.TableId;
+import io.confluent.connect.jdbc.sink.GenericDbWriter;
 
-import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
-
-import com.baydynamics.riskfabric.connect.jdbc.dialect.RiskFabricDatabaseDialect;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Optional;
 
 public class PgCopyWriter extends GenericDbWriter {
     private static final Logger log = LoggerFactory.getLogger(PgCopyWriter.class);
 
-    public PgCopyWriter(final RiskFabricJdbcSinkConfig config, RiskFabricDatabaseDialect dbDialect, DbStructure dbStructure) throws ConnectException {
+    private TableId tableId;
+    private String topicName;
+    private Integer[] partitionIds;
+
+    private boolean doOffsetTracking = false;
+
+    HashMap<TopicPartition, Long> dbOffsetMap = new HashMap<>();
+    public boolean dbOffsetMapNeedRefresh = false;
+
+    private Iterable<SinkTableState> partitionStates;
+
+    public PgCopyWriter(final RiskFabricJdbcSinkConfig config, RiskFabricDatabaseDialect dbDialect, DbStructure dbStructure) throws ConnectException
+    {
         super(config, dbDialect, dbStructure);
+    }
+
+    public PgCopyWriter trackOffsets(Collection<TopicPartition> partitionAssignements) {
+        if (!doOffsetTracking) {
+
+            // there is at least one by design
+            Optional<TopicPartition> first = partitionAssignements.stream().findFirst();
+
+            topicName = first.get().topic();
+            tableId = destinationTable(topicName);
+
+            partitionIds = new Integer[partitionAssignements.size()];
+            int i = 0;
+            for (TopicPartition topicPartition : partitionAssignements) {
+                partitionIds[i++] = topicPartition.partition();
+            }
+
+            dbOffsetMap = new HashMap<>();
+
+            // read or initialize offsets for partitionAssignements
+            final Connection connection = cachedConnectionProvider.getConnection();
+            Iterable<SinkTableState> partitionStates = SinkTableRoutines.getOrInitializeTopicPartitionState(connection, tableId.schemaName(), tableId.tableName(), topicName, partitionIds);
+
+            for (SinkTableState partitionState : partitionStates) {
+                dbOffsetMap.put(new TopicPartition(partitionState.kafkaTopic(), partitionState.kafkaPartition()), partitionState.tableKafkaOffset());
+            }
+
+            // safeguard check
+            for (TopicPartition partition : partitionAssignements) {
+                if (!dbOffsetMap.containsKey(partition)) {
+                    String msg = String.format("initialization error: topic partition %s-%d not found for sink table %s.", partition.topic(), partition.partition(), tableId.schemaName() != null ? tableId.schemaName() + "." : "" , tableId.tableName());
+                    throw new ConnectException(msg);
+                }
+            }
+
+            dbOffsetMapNeedRefresh = false;
+            doOffsetTracking = true;
+        }
+        return this;
+    }
+
+    public HashMap<TopicPartition,Long> getOffsetMap() {
+        if (doOffsetTracking) {
+
+            if (dbOffsetMapNeedRefresh) {
+                HashMap<TopicPartition, Long> offsetMap = new HashMap<>();
+
+                final Connection connection = cachedConnectionProvider.getConnection();
+                Iterable<SinkTableState> partitionStates = SinkTableRoutines.getOrInitializeTopicPartitionState(connection, tableId.schemaName(), tableId.tableName(), topicName, partitionIds);
+
+                for (SinkTableState partitionState : partitionStates) {
+                    offsetMap.put(new TopicPartition(partitionState.kafkaTopic(), partitionState.kafkaPartition()), partitionState.tableKafkaOffset());
+                }
+
+                dbOffsetMap = offsetMap;
+            }
+            else {
+                return dbOffsetMap;
+            }
+        }
+
+        throw new ConnectException(String.format("%s is not set to track offsets.", PgCopyWriter.class));
     }
 
     public void write(final Collection<SinkRecord> records) throws SQLException {
         final Connection connection = cachedConnectionProvider.getConnection();
-        PgCopy copyStatement = null;
+
+        PgCopyBuffer copyStatement = null;
         for (SinkRecord record : records) {
             if (copyStatement == null) {
-                RiskFabricJdbcSinkConfig cfg = (RiskFabricJdbcSinkConfig)config;
                 final TableId tableId = destinationTable(record.topic());
-                copyStatement = new PgCopy(cfg, tableId, (RiskFabricDatabaseDialect)dbDialect, dbStructure, connection);
+                copyStatement = new PgCopyBuffer((RiskFabricJdbcSinkConfig)config, tableId, (RiskFabricDatabaseDialect)dbDialect, dbStructure, connection)
+                {
+                    protected void onFlush(List<SinkRecord> flushedRecords, HashMap<Integer, Long> flushedOffsets) throws SQLException {
+
+                        if (doOffsetTracking) {
+                            // persist the offsets
+                            Integer[] ids = new Integer[flushedOffsets.size()];
+                            Long[] newOffsets = new Long[flushedOffsets.size()];
+                            int i = 0;
+                            for (Integer id : flushedOffsets.keySet()) {
+                                ids[i] = id;
+                                // INCREMENT PERSISTED OFFSET BY 1 AS THE NEXT STARTING POSITION
+                                newOffsets[i] = flushedOffsets.get(id) + 1;
+                                i++;
+                            }
+
+                            // persist offsets to database
+                            SinkTableRoutines.updateTopicPartitionState(connection, tableId.schemaName(), tableId.tableName(), topicName, ids, newOffsets);
+
+                            dbOffsetMapNeedRefresh = true;
+                        }
+
+                        connection.commit(); // checkpoint in transaction
+
+                        // after this point if doOffsetTracking=true and the connector fails or kafka fails
+                        // the connector may be restarted from the offsets
+
+                        log.info(String.format("batch with %d records committed.", flushedRecords.size()));
+                    }
+                };
             }
             copyStatement.add(record);
         }
 
-        copyStatement.close();
-
-        connection.commit();
+        copyStatement.flush();
     }
 }
