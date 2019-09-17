@@ -22,23 +22,22 @@ public class PgCopyWriter extends GenericDbWriter {
     private static final Logger log = LoggerFactory.getLogger(PgCopyWriter.class);
 
     private TableId tableId;
+    private String consumerGroupId;
     private String topicName;
     private Integer[] partitionIds;
 
     private boolean doOffsetTracking = false;
 
     HashMap<TopicPartition, Long> dbOffsetMap = new HashMap<>();
-    public boolean dbOffsetMapNeedRefresh = false;
-
-    private Iterable<SinkTableState> partitionStates;
 
     public PgCopyWriter(final RiskFabricJdbcSinkConfig config, RiskFabricDatabaseDialect dbDialect, DbStructure dbStructure) throws ConnectException
     {
         super(config, dbDialect, dbStructure);
     }
 
-    public PgCopyWriter trackOffsets(Collection<TopicPartition> partitionAssignements) {
+    public PgCopyWriter trackOffsets(String groupId, Collection<TopicPartition> partitionAssignements) {
         if (!doOffsetTracking) {
+            consumerGroupId = groupId;
 
             // there is at least one by design
             Optional<TopicPartition> first = partitionAssignements.stream().findFirst();
@@ -56,11 +55,7 @@ public class PgCopyWriter extends GenericDbWriter {
 
             // read or initialize offsets for partitionAssignements
             final Connection connection = cachedConnectionProvider.getConnection();
-            Iterable<SinkTableState> partitionStates = SinkTableRoutines.getOrInitializeTopicPartitionState(connection, tableId.schemaName(), tableId.tableName(), topicName, partitionIds);
-
-            for (SinkTableState partitionState : partitionStates) {
-                dbOffsetMap.put(new TopicPartition(partitionState.kafkaTopic(), partitionState.kafkaPartition()), partitionState.tableKafkaOffset());
-            }
+            dbOffsetMap = PgRoutines.getOrInitializeTopicPartitions(connection, consumerGroupId, tableId.schemaName(), tableId.tableName(), topicName, partitionIds);
 
             // safeguard check
             for (TopicPartition partition : partitionAssignements) {
@@ -70,7 +65,6 @@ public class PgCopyWriter extends GenericDbWriter {
                 }
             }
 
-            dbOffsetMapNeedRefresh = false;
             doOffsetTracking = true;
         }
         return this;
@@ -78,22 +72,12 @@ public class PgCopyWriter extends GenericDbWriter {
 
     public HashMap<TopicPartition,Long> getOffsetMap() {
         if (doOffsetTracking) {
-
-            if (dbOffsetMapNeedRefresh) {
-                HashMap<TopicPartition, Long> offsetMap = new HashMap<>();
-
+            if (dbOffsetMap == null) {
                 final Connection connection = cachedConnectionProvider.getConnection();
-                Iterable<SinkTableState> partitionStates = SinkTableRoutines.getOrInitializeTopicPartitionState(connection, tableId.schemaName(), tableId.tableName(), topicName, partitionIds);
-
-                for (SinkTableState partitionState : partitionStates) {
-                    offsetMap.put(new TopicPartition(partitionState.kafkaTopic(), partitionState.kafkaPartition()), partitionState.tableKafkaOffset());
-                }
-
-                dbOffsetMap = offsetMap;
+                dbOffsetMap = PgRoutines.getOrInitializeTopicPartitions(connection, consumerGroupId, tableId.schemaName(), tableId.tableName(), topicName, partitionIds);
             }
-            else {
-                return dbOffsetMap;
-            }
+
+            return dbOffsetMap;
         }
 
         throw new ConnectException(String.format("%s is not set to track offsets.", PgCopyWriter.class));
@@ -122,10 +106,8 @@ public class PgCopyWriter extends GenericDbWriter {
                                 i++;
                             }
 
-                            // persist offsets to database
-                            SinkTableRoutines.updateTopicPartitionState(connection, tableId.schemaName(), tableId.tableName(), topicName, ids, newOffsets);
-
-                            dbOffsetMapNeedRefresh = true;
+                            // persist to database
+                            dbOffsetMap = PgRoutines.updateWatermarkOffsets(connection, consumerGroupId, tableId.schemaName(), tableId.tableName(), topicName, ids, newOffsets);
                         }
 
                         connection.commit(); // checkpoint in transaction

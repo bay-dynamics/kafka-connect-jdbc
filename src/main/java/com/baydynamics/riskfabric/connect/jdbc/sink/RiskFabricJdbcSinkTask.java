@@ -43,11 +43,12 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
 
   DatabaseDialect dialect;
   RiskFabricJdbcSinkConfig config;
+  String groupId;
   DbWriter writer;
   int remainingRetries;
 
   SinkTaskContext sinkTaskContext;
-  Collection<TopicPartition> topicPartitions;
+  Collection<TopicPartition> partitionAssignments;
 
   /**
    * Initialise sink task
@@ -56,55 +57,54 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
   @Override
   public void initialize(SinkTaskContext context) {
     sinkTaskContext=context;//save task context
-
-
   }
 
   @Override
   public void start(final Map<String, String> props) throws ConnectException {
     log.info("Starting Risk Fabric JDBC Sink task");
     config = new RiskFabricJdbcSinkConfig(props);
+    groupId = props.get("name");
     remainingRetries = config.maxRetries;
     dialect = DatabaseDialects.create("RiskFabricDatabaseDialect", config);
   }
 
-  private DbWriter createWriter(Collection<TopicPartition> partitionAssignements) {
-    return null;
+  private DbWriter createWriter(String groupId, Collection<TopicPartition> partitionAssignements) {
+    DbWriter newWriter;
+    log.info("Creating writer for insert.mode {} using {} dialect", config.insertMode, dialect.getClass().getSimpleName());
+    final DbStructure dbStructure = new DbStructure(dialect);
+    if (config.insertMode.equals(JdbcSinkConfig.InsertMode.BULKCOPY)) {
+      PgCopyWriter pgWriter = new PgCopyWriter(config, (RiskFabricDatabaseDialect) dialect, dbStructure);
+
+      newWriter = pgWriter;
+
+      if (config.bulkCopyDeliveryMode == JdbcSinkConfig.DeliveryMode.SYNCHRONIZED) {
+        pgWriter.trackOffsets(groupId, partitionAssignements);
+
+        HashMap<TopicPartition, Long> offsetMap = pgWriter.getOffsetMap();
+        sinkTaskContext.offset(pgWriter.getOffsetMap());//synchronise offsets
+
+        String syncMessage = "Synchronized partitions:" + System.lineSeparator();
+        for (TopicPartition topicPartition : partitionAssignments) {
+          syncMessage += String.format("* starting %s at offset [%d]" + System.lineSeparator(), topicPartition.toString(), offsetMap.get(topicPartition));
+        }
+        log.info(syncMessage);
+
+      }
+    }
+    else {
+      newWriter = new JdbcDbWriter(config, dialect, dbStructure);
+    }
+    return newWriter;
   }
 
   public void open(Collection<TopicPartition> partitions) {
     log.info("Open partitions");
-    topicPartitions = partitions; // save for later
+    partitionAssignments = partitions; // save for later
 
     // open is called on each poll, so don't recreate the writer every time
     if (writer == null) {
-      // open() is called after start() and open is where the partitions are known
-      // with partitions known we can create the writer
-
-      log.info("Creating writer for insert.mode {} using {} dialect", config.insertMode, dialect.getClass().getSimpleName());
-      final DbStructure dbStructure = new DbStructure(dialect);
-      if (config.insertMode.equals(JdbcSinkConfig.InsertMode.BULKCOPY)) {
-        PgCopyWriter pgWriter = new PgCopyWriter(config, (RiskFabricDatabaseDialect) dialect, dbStructure);
-        if (config.bulkCopyDeliveryMode == JdbcSinkConfig.DeliveryMode.SYNCHRONIZED) {
-          pgWriter.trackOffsets(partitions);
-
-          HashMap<TopicPartition, Long> offsetMap = pgWriter.getOffsetMap();
-          sinkTaskContext.offset(pgWriter.getOffsetMap());//synchronise offsets
-
-          String syncMessage = "Synchronized partitions:" + System.lineSeparator();
-          for (TopicPartition topicPartition : topicPartitions) {
-            syncMessage += String.format("* starting %s at offset [%d]" + System.lineSeparator(), topicPartition.toString(), offsetMap.get(topicPartition));
-          }
-          log.info(syncMessage);
-
-          writer = pgWriter;
-        }
-      }
-      else {
-        writer = new JdbcDbWriter(config, dialect, dbStructure);
-      }
-
-      log.info("Writer of type {} created.", writer.getClass().getSimpleName());
+      // open() is called after start() and open() is where the partitions are known for the task
+      writer = createWriter(groupId, partitions);
     }
 
     super.open(partitions);
@@ -140,7 +140,7 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
         throw new ConnectException(new SQLException(sqleAllMessages));
       } else {
         writer.closeQuietly();
-        writer = createWriter(topicPartitions);
+        writer = createWriter(groupId, partitionAssignments);
         log.info("New Writer of type {} created.", writer.getClass().getSimpleName());
         remainingRetries--;
         context.timeout(config.retryBackoffMs);
