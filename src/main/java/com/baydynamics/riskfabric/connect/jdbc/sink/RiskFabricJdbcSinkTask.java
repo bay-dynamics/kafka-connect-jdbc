@@ -103,8 +103,7 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
 
     // open is called on each poll, so don't recreate the writer every time
     if (writer == null) {
-      // open() is called after start() and open is where the partitions are known
-      // with partitions known we can create the writer
+      // open() is called after start() and open() is where the partitions are known for the task
       writer = createWriter(groupId, partitions);
     }
 
