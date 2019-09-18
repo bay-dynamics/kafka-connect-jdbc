@@ -16,6 +16,7 @@ import io.confluent.connect.jdbc.sink.JdbcSinkConfig;
 import io.confluent.connect.jdbc.util.Version;
 
 import com.baydynamics.riskfabric.connect.jdbc.sink.RiskFabricJdbcSinkTask;
+import com.baydynamics.riskfabric.connect.jdbc.sink.RiskFabricJdbcSinkConfig;
 
 public class RiskFabricSinkConnector extends SinkConnector {
     private static final Logger log = LoggerFactory.getLogger(RiskFabricSinkConnector.class);
@@ -38,7 +39,7 @@ public class RiskFabricSinkConnector extends SinkConnector {
 
     @Override
     public void start(Map<String, String> props) {
-        //@TODO force properties to ensure RiskFabricDialect
+        //@TODO force properties to ensure RiskFabricDialect?
 
 
         configProps = props;
@@ -50,7 +51,7 @@ public class RiskFabricSinkConnector extends SinkConnector {
 
     @Override
     public ConfigDef config() {
-        return JdbcSinkConfig.CONFIG_DEF;
+        return RiskFabricJdbcSinkConfig.getConfigDef();
     }
 
     @Override

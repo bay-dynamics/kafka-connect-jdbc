@@ -92,12 +92,17 @@ public class RiskFabricDatabaseDialect extends PostgreSqlDatabaseDialect {
         int index,
         Schema schema,
         Object value) throws SQLException {
-        boolean bound = maybeBindLogical(statement, index, schema, value);
-        if (!bound) {
-            bound = maybeBindPrimitive(statement, index, schema, value);
+        if (value == null) {
+            statement.setObject(index, null);
         }
-        if (!bound) {
-            throw new ConnectException("Unsupported source data type: " + schema.type());
+        else {
+            boolean bound = maybeBindLogical(statement, index, schema, value);
+            if (!bound) {
+                bound = maybeBindPrimitive(statement, index, schema, value);
+            }
+            if (!bound) {
+                throw new ConnectException("Unsupported source data type: " + schema.type());
+            }
         }
     }
 
