@@ -26,6 +26,9 @@ public class LocalDateTimeConverter {
             throw new DataException("Requested conversion of " + schema.name() + "object but the schema does not match.");
         }
 
-        return LocalDateTime.ofInstant(Instant.ofEpochMilli((long) value), ZoneOffset.UTC); // use UTC for offset since the contract is LocalDateTime
+        if (value != null) {
+            return LocalDateTime.ofInstant(Instant.ofEpochMilli((long) value), ZoneOffset.UTC); // use UTC for offset since the contract is LocalDateTime
+        }
+        return null;
     }
 }

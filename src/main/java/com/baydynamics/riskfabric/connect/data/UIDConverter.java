@@ -21,6 +21,10 @@ public class UIDConverter {
         if (!(LOGICAL_NAME.equals(schema.name()))) {
             throw new DataException("Requested conversion of " + schema.name() + " object but the schema does not match.");
         }
-        return java.util.UUID.fromString(value.toString());
+
+        if (value != null) {
+            return java.util.UUID.fromString(value.toString());
+        }
+        return null;
     }
 }

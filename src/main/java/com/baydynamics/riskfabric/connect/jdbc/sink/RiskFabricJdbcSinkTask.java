@@ -73,11 +73,11 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
     log.info("Creating writer for insert.mode {} using {} dialect", config.insertMode, dialect.getClass().getSimpleName());
     final DbStructure dbStructure = new DbStructure(dialect);
     if (config.insertMode.equals(JdbcSinkConfig.InsertMode.BULKCOPY)) {
-      PgCopyWriter pgWriter = new PgCopyWriter(config, (RiskFabricDatabaseDialect) dialect, dbStructure);
 
+      PgCopyWriter pgWriter = new PgCopyWriter(config, (RiskFabricDatabaseDialect) dialect, dbStructure);
       newWriter = pgWriter;
 
-      if (config.bulkCopyDeliveryMode == JdbcSinkConfig.DeliveryMode.SYNCHRONIZED) {
+      if (config.insertDeliveryMode == RiskFabricJdbcSinkConfig.DeliveryMode.EXACTLY_ONCE) {
         pgWriter.trackOffsets(groupId, partitionAssignements);
 
         HashMap<TopicPartition, Long> offsetMap = pgWriter.getOffsetMap();
@@ -88,12 +88,13 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
           syncMessage += String.format("* starting %s at offset [%d]" + System.lineSeparator(), topicPartition.toString(), offsetMap.get(topicPartition));
         }
         log.info(syncMessage);
-
       }
+      // else is JdbcSinkConfig.DeliveryMode.AT_LEAST_ONCE
     }
-    else {
+    else { // JdbcSinkConfig.DeliveryMode.AT_LEAST_ONCE
       newWriter = new JdbcDbWriter(config, dialect, dbStructure);
     }
+
     return newWriter;
   }
 
