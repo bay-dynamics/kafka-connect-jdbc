@@ -1501,16 +1501,6 @@ public class GenericDatabaseDialect implements DatabaseDialect {
     return index;
   }
 
-//  @Override
-//  public int bindCompositeField(
-//      PreparedStatement statement,
-//      int startIndex,
-//      Schema schema,
-//      Struct value
-//  ) throws SQLException {
-//    throw new UnsupportedOperationException();
-//  }
-
   protected boolean maybeBindPrimitive(
       PreparedStatement statement,
       int index,

@@ -60,9 +60,6 @@ import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.config.types.Password;
 
-import static java.util.stream.Collectors.mapping;
-import static java.util.stream.Collectors.toList;
-
 public class JdbcSinkConfig extends AbstractConfig {
 
   public enum InsertMode {
