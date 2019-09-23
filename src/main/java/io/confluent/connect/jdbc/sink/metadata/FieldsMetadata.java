@@ -105,7 +105,6 @@ public class FieldsMetadata {
     }
 
     final Set<String> nonKeyFieldNames = new LinkedHashSet<>();
-    //final Set<String> nonKeyFieldNamesRaw = new LinkedHashSet<>();
 
     if (valueSchema != null) {
       for (Field field : valueSchema.fields()) {
@@ -115,23 +114,9 @@ public class FieldsMetadata {
         if (!fieldsWhitelist.isEmpty() && !fieldsWhitelist.contains(field.name())) {
           continue;
         }
-
-        //nonKeyFieldNamesRaw.add(field.name());
-
-//        if (field.schema().type().equals(Schema.Type.STRUCT)) {
-//
-//          for (final Field nestedField : field.schema().fields()) {
-//            String nestedFieldName = field.name() + "." + nestedField.name();
-//            nonKeyFieldNames.add(nestedFieldName);
-//            final Schema nestedFieldSchema = nestedField.schema();
-//            allFields.put(nestedFieldName, new SinkRecordField(nestedFieldSchema, nestedFieldName, false));
-//          }
-//        }
-//        else {
           nonKeyFieldNames.add(field.name());
           final Schema fieldSchema = field.schema();
           allFields.put(field.name(), new SinkRecordField(fieldSchema, field.name(), false));
-//        }
       }
     }
 

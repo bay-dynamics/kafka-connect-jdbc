@@ -28,7 +28,6 @@ import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.RetriableException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
-import org.apache.kafka.connect.sink.SinkTaskContext;
 
 import com.baydynamics.riskfabric.connect.jdbc.dialect.RiskFabricDatabaseDialect;
 
@@ -47,17 +46,7 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
   DbWriter writer;
   int remainingRetries;
 
-  SinkTaskContext sinkTaskContext;
   Collection<TopicPartition> partitionAssignments;
-
-  /**
-   * Initialise sink task
-   * @param context context of the sink task
-   */
-  @Override
-  public void initialize(SinkTaskContext context) {
-    sinkTaskContext=context;//save task context
-  }
 
   @Override
   public void start(final Map<String, String> props) throws ConnectException {
@@ -68,7 +57,7 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
     dialect = DatabaseDialects.create("RiskFabricDatabaseDialect", config);
   }
 
-  private DbWriter createWriter(String groupId, Collection<TopicPartition> partitionAssignements) {
+  private DbWriter initWriter(String groupId, Collection<TopicPartition> partitionAssignements) {
     DbWriter newWriter;
     log.info("Creating writer for insert.mode {} using {} dialect", config.insertMode, dialect.getClass().getSimpleName());
     final DbStructure dbStructure = new DbStructure(dialect);
@@ -81,7 +70,7 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
         pgWriter.trackOffsets(groupId, partitionAssignements);
 
         HashMap<TopicPartition, Long> offsetMap = pgWriter.getOffsetMap();
-        sinkTaskContext.offset(pgWriter.getOffsetMap());//synchronise offsets
+        context.offset(pgWriter.getOffsetMap());//synchronise offsets
 
         String syncMessage = "Synchronized partitions:" + System.lineSeparator();
         for (TopicPartition topicPartition : partitionAssignments) {
@@ -89,6 +78,12 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
         }
         log.info(syncMessage);
       }
+
+      if (config.batchKeyDedup) {
+        String[] keyFields = config.bulkCopyDedupBufferKeyFields.split(",");
+        pgWriter.dedupRecords(config.bulkCopyDedupBufferQuery, config.bulkCopyDedupBufferSize, keyFields);
+      }
+
       // else is JdbcSinkConfig.DeliveryMode.AT_LEAST_ONCE
     }
     else { // JdbcSinkConfig.DeliveryMode.AT_LEAST_ONCE
@@ -105,7 +100,7 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
     // open is called on each poll, so don't recreate the writer every time
     if (writer == null) {
       // open() is called after start() and open() is where the partitions are known for the task
-      writer = createWriter(groupId, partitions);
+      writer = initWriter(groupId, partitions);
     }
 
     super.open(partitions);
@@ -141,7 +136,7 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
         throw new ConnectException(new SQLException(sqleAllMessages));
       } else {
         writer.closeQuietly();
-        writer = createWriter(groupId, partitionAssignments);
+        writer = initWriter(groupId, partitionAssignments);
         log.info("New Writer of type {} created.", writer.getClass().getSimpleName());
         remainingRetries--;
         context.timeout(config.retryBackoffMs);
@@ -161,7 +156,9 @@ public class RiskFabricJdbcSinkTask extends SinkTask {
   public void stop() {
     log.info("Stopping task");
     try {
-      writer.closeQuietly();
+      if (writer != null) {
+        writer.closeQuietly();
+      }
     } finally {
       try {
         if (dialect != null) {

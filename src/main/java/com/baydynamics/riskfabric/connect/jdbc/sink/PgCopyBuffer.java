@@ -9,6 +9,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 import com.baydynamics.riskfabric.connect.jdbc.dialect.RiskFabricDatabaseDialect;
+import com.baydynamics.riskfabric.connect.jdbc.util.CircularFifoHashSet;
 import io.confluent.connect.jdbc.sink.DbStructure;
 import io.confluent.connect.jdbc.sink.metadata.FieldsMetadata;
 import io.confluent.connect.jdbc.sink.metadata.SchemaPair;
@@ -47,16 +48,11 @@ public class PgCopyBuffer {
   Schema keySchema;
   Schema valueSchema;
   FieldsMetadata fieldsMetadata;
-  Collection<ColumnId> fieldNames;
 
   private final CopyManager copyManager;
   private StringBuilder copyCommand;
   private StringBuilder bufferBuilder = null;
   private int bufferWatermark;
-  private Struct parentValue;
-
-  //Offset management
-  HashMap<Integer, Long> offsetByPartition = new HashMap<Integer, Long>();
 
   public PgCopyBuffer(
       RiskFabricJdbcSinkConfig config,
@@ -64,7 +60,6 @@ public class PgCopyBuffer {
       RiskFabricDatabaseDialect dbDialect,
       DbStructure dbStructure,
       Connection connection) throws SQLException {
-
     this.tableId = tableId;
     this.config = config;
     this.dbDialect = dbDialect;
@@ -76,12 +71,11 @@ public class PgCopyBuffer {
   }
 
   public List<SinkRecord> add(SinkRecord record) throws SQLException {
-    final List<SinkRecord> flushed = new ArrayList<>();
-
     if (!record.valueSchema().type().equals(Schema.Type.STRUCT)) {
       throw new ConnectException("record must be of type STRUCT");
     }
 
+    final List<SinkRecord> flushed = new ArrayList<>();
     Struct recordValue = (Struct) record.value();
 
     boolean schemaChanged = false;
@@ -151,15 +145,9 @@ public class PgCopyBuffer {
       final Object value = recordValue.get(field);
       appendFieldValue(bufferBuilder, field.schema(), value, QUOTE_CHARACTER);
     }
+
     bufferBuilder.append(ROW_DELIMITER);
     bufferWatermark=bufferBuilder.length();
-
-    if (offsetByPartition.containsKey(record.kafkaPartition())) {
-      offsetByPartition.replace(record.kafkaPartition(), record.kafkaOffset());
-    }
-    else {
-      offsetByPartition.put(record.kafkaPartition(), record.kafkaOffset());
-    }
 
     records.add(record);
 
@@ -180,11 +168,11 @@ public class PgCopyBuffer {
     if (bufferWatermark > 0) {
       try {
         copyManager.copyIn(copyCommand.toString(), new StringReader(bufferBuilder.substring(0, bufferWatermark).toString()));
-        bufferBuilder.delete(0, bufferWatermark);//remove written rows from the buffer
+        bufferBuilder.delete(0, bufferWatermark); //remove written rows from the buffer
         bufferWatermark = 0;
 
         flushedRecords = records;
-        onFlush(flushedRecords, offsetByPartition);
+        onFlush(flushedRecords);
       }
       catch (IOException exception) {
         throw new SQLException(exception.getMessage());
@@ -199,7 +187,7 @@ public class PgCopyBuffer {
   }
 
 
-  protected void onFlush(List<SinkRecord> flushedRecords, HashMap<Integer, Long> flushedOffsets) throws SQLException {
+  protected void onFlush(List<SinkRecord> flushedRecords) throws SQLException {
 
   }
 
